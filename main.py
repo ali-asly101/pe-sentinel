@@ -1,344 +1,217 @@
-# test_disasm.py
+#!/usr/bin/env python3
+"""
+Interactive CLI for PE binary analysis
+"""
 import code
 import sys
-from capstone import *
-import pefile
-import math
 import tkinter as tk
 from tkinter import filedialog
 
-
-def calculate_entropy(data):
-    """Returns Shannon Entropy of data (0.0 to 8.0)"""
-    if not data:
-        return 0.0
-    entropy = 0
-    # Create frequency list for all 256 possible byte values
-    for x in range(256):
-        p_x = float(data.count(x)) / len(data)
-        if p_x > 0:
-            entropy += -p_x * math.log(p_x, 2)
-    return entropy
+from core.pe_parser import PEAnalyzer
+from core.disassembler import Disassembler
+from core.analyzers import EntropyAnalyzer, PackerDetector, StringExtractor
+from core.threat_scorer import ThreatScorer
 
 
-def get_file_entropy(path):
-    with open(path, "rb") as f:
-        data = f.read()
-    return calculate_entropy(data)
+def select_file() -> str:
+    """Open file dialog to select PE file"""
+    root = tk.Tk()
+    root.withdraw()
+
+    filepath = filedialog.askopenfilename(
+        title="Select a Windows executable",
+        filetypes=[("Executable Files", "*.exe *.dll"), ("All Files", "*.*")],
+    )
+
+    if not filepath:
+        print("No file selected. Exiting.")
+        sys.exit(1)
+
+    return filepath
 
 
-def check_for_upx(pe):
-    """Detect if the file is packed with UPX"""
-    for section in pe.sections:
-        name = section.Name.decode().rstrip("\x00")
-        if "UPX" in name:
-            return True
-    return False
+def main():
+    # Select and load file
+    filepath = select_file()
 
+    try:
+        pe_analyzer = PEAnalyzer(filepath)
+        print(f"✓ Loaded: {filepath}")
+    except Exception as e:
+        print(f"✗ Error loading file: {e}")
+        sys.exit(1)
 
-# Open file dialog
-root = tk.Tk()
-root.withdraw()
-file_path = filedialog.askopenfilename(
-    title="Select a Windows executable",
-    filetypes=[("Executable Files", "*.exe *.dll"), ("All Files", "*.*")],
-)
+    # Initialize components
+    disasm = Disassembler(pe_analyzer)
 
-if not file_path:
-    print("No file selected. Exiting.")
-    sys.exit(1)
+    # Run initial analysis
+    print("\n" + "=" * 70)
+    print("ANALYZING...")
+    print("=" * 70)
 
-# Load PE file with error handling
-try:
-    pe = pefile.PE(file_path)
-    print(f"Loaded: {file_path}")
-except pefile.PEFormatError as e:
-    print(f"Error: Not a valid PE file - {e}")
-    sys.exit(1)
-except Exception as e:
-    print(f"Error loading file: {e}")
-    sys.exit(1)
+    sections = pe_analyzer.get_sections()
+    imports = pe_analyzer.get_imports()
+    packers = PackerDetector.detect_known_packers(sections)
 
-is_upx = check_for_upx(pe)
-if is_upx:
-    print("!!! WARNING: UPX Packer Detected !!!")
-    print("Static disassembly and string search will be inaccurate.")
+    # Threat assessment
+    scorer = ThreatScorer(sections, imports, pe_analyzer.is_signed(), packers)
+    threat_score, threat_reasons = scorer.calculate_score()
 
+    # Disassembly
+    entry_point = pe_analyzer.get_entry_point()
+    print(f"\nDisassembling from entry point {entry_point['address']}...")
+    entry_disasm = disasm.disasm_from_rva(entry_point["rva"], count=200)
 
-def check_stealth_packing(pe):
-    print("\n--- Stealth Analysis ---")
-    for section in pe.sections:
-        # Check for the Virtual vs Raw Size Gap
-        # If VirtualSize is much bigger than RawSize, it's a 'loading' area
-        if section.Misc_VirtualSize > (section.SizeOfRawData * 3):
-            name = section.Name.decode().rstrip("\x00")
-            print(f"[!] Warning: Section {name} expands significantly in RAM.")
-            print(f"    Possible 'Code Unfolding' detected.")
+    print(f"Disassembling .text section...")
+    text_disasm = disasm.disasm_text_section(
+        progress_callback=lambda count: print(f"  {count} instructions...")
+    )
 
-    # Check for weird alignment
-    if pe.OPTIONAL_HEADER.SectionAlignment < 0x1000:
-        print(
-            f"[!] Warning: Non-standard Section Alignment: {hex(pe.OPTIONAL_HEADER.SectionAlignment)}"
-        )
-
-
-def get_section_permissions(characteristics):
-    perms = ""
-    if characteristics & 0x40000000:
-        perms += "R"
-    if characteristics & 0x80000000:
-        perms += "W"
-    if characteristics & 0x20000000:
-        perms += "X"
-    return perms
-
-
-def get_architecture(pe):
-    """Detect PE architecture"""
-    machine = pe.FILE_HEADER.Machine
-    if machine == 0x14C:
-        return CS_ARCH_X86, CS_MODE_32
-    elif machine == 0x8664:
-        return CS_ARCH_X86, CS_MODE_64
-    else:
-        raise ValueError(f"Unsupported architecture: {hex(machine)}")
-
-
-def disasm_n_instructions(pe, rva, count=100):
-    """Disassemble N instructions from given RVA"""
-    arch, mode = get_architecture(pe)
-    offset = pe.get_offset_from_rva(rva)
-    code = pe.__data__[offset : offset + count * 15]  # Max 15 bytes per instruction
-
-    md = Cs(arch, mode)
-    instructions = []
-
-    for instruction in md.disasm(code, pe.OPTIONAL_HEADER.ImageBase + rva):
-        instructions.append(
-            f"0x{instruction.address:x}:\t{instruction.mnemonic}\t{instruction.op_str}"
-        )
-        if len(instructions) >= count:
-            break
-        if instruction.mnemonic == "":
-            print(f"Dead/Invalid code found at {hex(instruction.address)}")
-
-    return instructions
-
-
-def disasm_code_section(pe):
-    """Disassemble entire .text section"""
-    arch, mode = get_architecture(pe)
-
-    # Find .text section
-    text_section = None
-    for section in pe.sections:
-        if section.Name.startswith(b".text"):
-            text_section = section
-            break
-
-    if not text_section:
-        print("Warning: No .text section found!")
-        return []
-
-    code = text_section.get_data()
-    base_addr = pe.OPTIONAL_HEADER.ImageBase + text_section.VirtualAddress
-
-    print(f"Disassembling .text section ({len(code)} bytes)...")
-
-    md = Cs(arch, mode)
-    instructions = []
-
-    for i, instruction in enumerate(md.disasm(code, base_addr)):
-        instructions.append(
-            f"0x{instruction.address:x}:\t{instruction.mnemonic}\t{instruction.op_str}"
-        )
-        if (i + 1) % 10000 == 0:
-            print(f"  {i + 1} instructions...")
-
-    print(f"Complete! {len(instructions)} total instructions")
-    return instructions
-
-
-def analyze_binary():
-    """Perform full binary analysis"""
-    entry_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
-    global_entropy = get_file_entropy(file_path)  # Calculate for the whole file
-
-    entry_disasm = disasm_n_instructions(pe, entry_rva, count=200)
-    text_disasm = disasm_code_section(pe)
-    if check_signature_directory():
-        print("File is signed.")
-    check_stealth_packing(pe)
-    return {
-        "global_entropy": global_entropy,
-        "entry_point": {
-            "address": f"0x{entry_rva:x}",
-            "instructions": entry_disasm,
-        },
-        "full_disassembly": {
-            "instructions": text_disasm,
-            "count": len(text_disasm),
-        },
+    # Package results
+    analysis_data = {
+        "metadata": pe_analyzer.get_metadata(),
+        "threat_score": threat_score,
+        "threat_reasons": threat_reasons,
+        "threat_level": scorer.get_threat_level(threat_score),
+        "sections": sections,
+        "imports": imports,
+        "packers": packers,
+        "entry_disasm": entry_disasm,
+        "text_disasm": text_disasm,
     }
 
-
-# Helper functions
-def show_entry(count=20):
-    """Show first N instructions from entry point"""
-    for inst in disasm_data["entry_point"]["instructions"][:count]:
-        print(inst)
-
-
-def search_inst(mnemonic):
-    """Search for instructions by mnemonic"""
-    results = [
-        inst
-        for inst in disasm_data["full_disassembly"]["instructions"]
-        if mnemonic.lower() in inst.lower()
-    ]
-    print(f"Found {len(results)} matches for '{mnemonic}':")
-    for inst in results[:50]:
-        print(inst)
-    return results
-
-
-def find_strings():
-    """Extract ASCII strings"""
-    strings = []
-    for section in pe.sections:
-        if b".rdata" in section.Name or b".data" in section.Name:
-            data = section.get_data()
-            current = ""
-            for byte in data:
-                if 32 <= byte <= 126:
-                    current += chr(byte)
-                else:
-                    if len(current) >= 4:
-                        strings.append(current)
-                    current = ""
-
-    print(f"Found {len(strings)} strings:")
-    for s in strings[:50]:
-        print(f"  {s}")
-    return strings
-
-
-def show_imports():
-    """Display imports"""
-    if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
-        for entry in pe.DIRECTORY_ENTRY_IMPORT:
-            print(f"\n{entry.dll.decode('utf-8')}:")
-            for imp in entry.imports[:20]:
-                name = (
-                    imp.name.decode("utf-8") if imp.name else f"Ordinal_{imp.ordinal}"
-                )
-                print(f"  {name}")
-    else:
-        print("No imports found")
-
-
-def classify_entropy(entropy, section_name):
-    """Classify section based on entropy with context"""
-
-    # Adjust thresholds based on section type
-    if section_name == ".text":
-        if entropy > 6.8:
-            return "High Entropy (Possible Obfuscation/Packing)"
-        elif entropy < 4.0:
-            return "Low Entropy (Sparse Code/Debugging)"
-        else:
-            return "Normal Code"
-
-    elif section_name in [".data", ".rdata"]:
-        if entropy > 7.5:
-            return "ENCRYPTED/COMPRESSED DATA"
-        elif entropy < 2.0:
-            return "Mostly Zeros/Padding"
-        else:
-            return "Normal Data"
-
-    elif section_name == ".rsrc":
-        # Resources naturally have high entropy (images, etc.)
-        if entropy > 7.8:
-            return "High (May Contain Compressed Resources)"
-        else:
-            return "Normal Resources"
-
-    else:
-        if entropy > 7.2:
-            return "PACKED/ENCRYPTED"
-        elif entropy < 1.0:
-            return "EMPTY/PADDING"
-        else:
-            return "Normal"
-
-
-def show_sections():
-    """Display sections with detailed analysis"""
-    print(
-        f"\n{'Section':<12} {'VirtAddr':<12} {'VirtSize':<12} {'RawSize':<12} {'Perms':<6} {'Entropy':<8} {'Status'}"
-    )
-    print("-" * 100)
-
-    for section in pe.sections:
-        perms = get_section_permissions(section.Characteristics)
-        name = section.Name.decode().rstrip("\x00")
-        data = section.get_data()
-        entropy = calculate_entropy(data)
-
-        # Classify based on multiple factors
-        status = classify_entropy(entropy, name)
-
-        # Override with more specific warnings
-        if "W" in perms and "X" in perms:
-            status = "⚠️  W+X (SELF-MODIFYING CODE)"
-
+    # Helper functions for interactive console
+    def show_summary():
+        """Show file summary"""
+        meta = analysis_data["metadata"]
+        print("\n" + "=" * 70)
+        print("FILE SUMMARY")
+        print("=" * 70)
+        print(f"File: {meta['filename']}")
+        print(f"Size: {meta['filesize']:,} bytes")
+        print(f"Architecture: {meta['architecture']}")
+        print(f"Entry Point: {meta['entry_point']}")
+        print(f"Signed: {'Yes' if meta['is_signed'] else 'No'}")
         print(
-            f"{name:<12} {hex(section.VirtualAddress):<12} "
-            f"{section.Misc_VirtualSize:<12} {section.SizeOfRawData:<12} "
-            f"{perms:<6} {entropy:<8.2f} {status}"
+            f"\nThreat Score: {analysis_data['threat_score']}/100 ({analysis_data['threat_level']})"
         )
+        print("=" * 70 + "\n")
 
+    def show_threat_analysis():
+        """Show detailed threat analysis"""
+        print("\n" + "=" * 70)
+        print("THREAT ANALYSIS")
+        print("=" * 70)
+        print(f"\nScore: {analysis_data['threat_score']}/100")
+        print(f"Level: {analysis_data['threat_level']}\n")
+        print("Indicators:")
+        for reason in analysis_data["threat_reasons"]:
+            print(f"  • {reason}")
 
-def check_signature_directory():
-    """Check if the file has a security directory (signature)"""
-    # Look for the Security Directory index (Entry 4)
-    security_dir = pe.OPTIONAL_HEADER.DATA_DIRECTORY[
-        pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_SECURITY"]
-    ]
+        suspicious = scorer.get_suspicious_imports()
+        if suspicious:
+            print(f"\nSuspicious API Calls ({len(suspicious)}):")
+            for api in suspicious[:20]:
+                print(f"  • {api['dll']}!{api['function']} - {api['reason']}")
 
-    if security_dir.VirtualAddress > 0 and security_dir.Size > 0:
-        print(f"[+] File has a Digital Signature (Size: {security_dir.Size} bytes)")
-        return True
-    else:
-        print("[!] WARNING: File is UNSIGNED (No security directory found)")
-        return False
+        print("=" * 70 + "\n")
 
+    def show_sections():
+        """Show section analysis"""
+        print(
+            f"\n{'Section':<12} {'VirtAddr':<12} {'VSize':<10} {'RawSize':<10} {'Perms':<6} {'Entropy':<8} {'Status'}"
+        )
+        print("-" * 100)
 
-# Run analysis
-disasm_data = analyze_binary()
+        for section in sections:
+            entropy = EntropyAnalyzer.calculate(section["data"])
+            status = EntropyAnalyzer.classify(entropy, section["name"])
 
-# Start console
-banner = f"""
+            if "W" in section["permissions"] and "X" in section["permissions"]:
+                status = "⚠️  W+X (SELF-MODIFYING)"
+
+            print(
+                f"{section['name']:<12} "
+                f"{hex(section['virtual_address']):<12} "
+                f"{section['virtual_size']:<10} "
+                f"{section['raw_size']:<10} "
+                f"{section['permissions']:<6} "
+                f"{entropy:<8.2f} "
+                f"{status}"
+            )
+
+    def show_entry(count=20):
+        """Show first N instructions from entry point"""
+        for inst in entry_disasm[:count]:
+            print(f"{inst['address']}:\t{inst['mnemonic']}\t{inst['op_str']}")
+
+    def search_inst(mnemonic):
+        """Search for instruction mnemonic"""
+        results = disasm.search_instruction(mnemonic, text_disasm)
+        print(f"Found {len(results)} matches for '{mnemonic}':")
+        for inst in results[:50]:
+            print(f"{inst['address']}:\t{inst['mnemonic']}\t{inst['op_str']}")
+        return results
+
+    def find_strings():
+        """Extract strings from data sections"""
+        all_strings = []
+        for section in sections:
+            if section["name"] in [".rdata", ".data"]:
+                strings = StringExtractor.extract_ascii(section["data"])
+                all_strings.extend(strings)
+
+        print(f"Found {len(all_strings)} strings:")
+        for s in all_strings[:50]:
+            print(f"  {s}")
+        return all_strings
+
+    def show_imports():
+        """Show imports with suspicious API highlighting"""
+        suspicious_apis = {api["function"] for api in scorer.get_suspicious_imports()}
+
+        for dll in imports:
+            print(f"\n{dll['dll']}:")
+            for func in dll["functions"][:20]:
+                if func["name"] in suspicious_apis:
+                    print(f"  ⚠️  {func['name']}")
+                else:
+                    print(f"  {func['name']}")
+
+    # Start interactive console
+    banner = f"""
 ╔════════════════════════════════════════════════════════════════╗
-║          Interactive PE Disassembly Console                    ║
+║          Interactive PE Analysis Console                       ║
 ╚════════════════════════════════════════════════════════════════╝
 
-File: {file_path}
-Entry Point: {disasm_data['entry_point']['address']}
+File: {analysis_data['metadata']['filename']}
+Threat: {analysis_data['threat_score']}/100 ({analysis_data['threat_level']})
 
-Commands: show_entry(), search_inst(), find_strings(), show_imports(), show_sections()
+Quick Start:
+  show_summary()         - File overview
+  show_threat_analysis() - Detailed threat assessment
+  show_sections()        - Section analysis
+  show_imports()         - Import table
+  show_entry(50)         - First 50 instructions
+  search_inst('call')    - Find CALL instructions
+  find_strings()         - Extract strings
 """
 
-code.interact(
-    banner=banner,
-    local={
-        "disasm_data": disasm_data,
-        "pe": pe,
-        "show_entry": show_entry,
-        "search_inst": search_inst,
-        "find_strings": find_strings,
-        "show_imports": show_imports,
-        "show_sections": show_sections,
-    },
-)
+    code.interact(
+        banner=banner,
+        local={
+            "analysis_data": analysis_data,
+            "pe_analyzer": pe_analyzer,
+            "show_summary": show_summary,
+            "show_threat_analysis": show_threat_analysis,
+            "show_sections": show_sections,
+            "show_entry": show_entry,
+            "search_inst": search_inst,
+            "find_strings": find_strings,
+            "show_imports": show_imports,
+        },
+    )
+
+
+if __name__ == "__main__":
+    main()
