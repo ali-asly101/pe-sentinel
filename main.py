@@ -27,6 +27,15 @@ def get_file_entropy(path):
     return calculate_entropy(data)
 
 
+def check_for_upx(pe):
+    """Detect if the file is packed with UPX"""
+    for section in pe.sections:
+        name = section.Name.decode().rstrip("\x00")
+        if "UPX" in name:
+            return True
+    return False
+
+
 # Open file dialog
 root = tk.Tk()
 root.withdraw()
@@ -49,6 +58,11 @@ except pefile.PEFormatError as e:
 except Exception as e:
     print(f"Error loading file: {e}")
     sys.exit(1)
+
+is_upx = check_for_upx(pe)
+if is_upx:
+    print("!!! WARNING: UPX Packer Detected !!!")
+    print("Static disassembly and string search will be inaccurate.")
 
 
 def get_architecture(pe):
