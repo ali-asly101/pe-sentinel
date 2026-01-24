@@ -320,3 +320,427 @@ class SegmentEntropyAnalyzer:
             bars.append(f"  {offset_kb:>6.0f} KB: {marker} {bar:<40} {entropy:.2f}")
 
         return "\n".join(bars)
+
+
+"""
+Enhanced section analysis combining multiple indicators
+"""
+from typing import Dict, Tuple
+from dataclasses import dataclass
+
+
+@dataclass
+class SectionAnalysis:
+    """Comprehensive section analysis result"""
+
+    name: str
+    entropy: float
+    entropy_status: str
+    size_ratio: float
+    size_status: str
+    permissions: str
+    permission_status: str
+    suspicion_score: int  # 0-100
+    suspicion_level: str  # LOW/MEDIUM/HIGH/CRITICAL
+    warnings: list
+    is_suspicious: bool
+
+
+class SectionAnalyzer:
+    """Advanced section analysis combining entropy, size, and permissions"""
+
+    # Expected entropy ranges by section type
+    EXPECTED_ENTROPY = {
+        ".text": (4.5, 6.5),  # Code: moderate entropy
+        ".data": (3.0, 6.0),  # Data: variable
+        ".rdata": (4.0, 6.5),  # Read-only data: moderate
+        ".bss": (0.0, 1.0),  # Uninitialized: very low
+        ".rsrc": (5.0, 7.5),  # Resources: can be high (compressed images)
+        ".reloc": (2.0, 5.0),  # Relocation table: low-moderate
+    }
+
+    # Expected size ratios (VirtualSize / RawSize)
+    EXPECTED_SIZE_RATIO = {
+        ".text": (0.95, 1.05),  # Code: usually 1:1
+        ".data": (0.9, 2.0),  # Data: slight expansion OK
+        ".rdata": (0.95, 1.1),  # Read-only: minimal expansion
+        ".bss": (1.0, float("inf")),  # BSS: always expands (disk=0)
+        ".rsrc": (0.9, 1.2),  # Resources: usually 1:1
+        ".reloc": (0.9, 1.5),  # Relocations: slight expansion OK
+    }
+
+    @classmethod
+    def analyze_section(cls, section: Dict) -> SectionAnalysis:
+        """
+        Perform comprehensive section analysis.
+        Returns SectionAnalysis with suspicion score and detailed breakdown.
+        """
+        name = section["name"]
+        data = section["data"]
+        vsize = section["virtual_size"]
+        rsize = section["raw_size"]
+        perms = section["permissions"]
+
+        # Calculate metrics
+        entropy = EntropyAnalyzer.calculate(data)
+        size_ratio = vsize / rsize if rsize > 0 else float("inf")
+
+        # Score components
+        entropy_score, entropy_status = cls._score_entropy(entropy, name)
+        size_score, size_status = cls._score_size_ratio(size_ratio, name, rsize)
+        perm_score, perm_status = cls._score_permissions(perms, name)
+
+        # Combine scores
+        suspicion_score = cls._calculate_suspicion_score(
+            entropy_score, size_score, perm_score, name
+        )
+
+        # Generate warnings
+        warnings = cls._generate_warnings(
+            name, entropy, size_ratio, perms, entropy_score, size_score, perm_score
+        )
+
+        # Determine level
+        suspicion_level = cls._get_suspicion_level(suspicion_score)
+        is_suspicious = suspicion_score >= 50
+
+        return SectionAnalysis(
+            name=name,
+            entropy=entropy,
+            entropy_status=entropy_status,
+            size_ratio=size_ratio,
+            size_status=size_status,
+            permissions=perms,
+            permission_status=perm_status,
+            suspicion_score=suspicion_score,
+            suspicion_level=suspicion_level,
+            warnings=warnings,
+            is_suspicious=is_suspicious,
+        )
+
+    @classmethod
+    def _score_entropy(cls, entropy: float, section_name: str) -> Tuple[int, str]:
+        """
+        Score entropy (0-40 points).
+        Returns (score, status_description)
+        """
+        # Get expected range for this section type
+        expected = cls.EXPECTED_ENTROPY.get(section_name, (3.0, 7.0))
+        min_expected, max_expected = expected
+
+        # Special case: .bss should have very low entropy
+        if section_name == ".bss":
+            if entropy < 1.0:
+                return 0, "Normal (uninitialized data)"
+            else:
+                return 30, "⚠️ Suspicious (BSS should be mostly zeros)"
+
+        # High entropy (possible packing/encryption)
+        if entropy > 7.5:
+            return 40, "⚠️ Very High (Likely packed/encrypted)"
+        elif entropy > max_expected:
+            return 25, "⚠️ High (Possible obfuscation)"
+
+        # Low entropy (possible padding/sparse code)
+        elif entropy < min_expected and section_name == ".text":
+            return 15, "⚠️ Low (Sparse code/debugging symbols)"
+
+        # Normal range
+        else:
+            return 0, "Normal"
+
+    @classmethod
+    def _score_size_ratio(
+        cls, ratio: float, section_name: str, raw_size: int
+    ) -> Tuple[int, str]:
+        """
+        Score size ratio (0-40 points).
+        Returns (score, status_description)
+        """
+        # Special case: .bss has no disk size (always expands)
+        if section_name == ".bss" and raw_size == 0:
+            return 0, "Normal (uninitialized data)"
+
+        # Get expected ratio range
+        expected = cls.EXPECTED_SIZE_RATIO.get(section_name, (0.9, 2.0))
+        min_ratio, max_ratio = expected
+
+        # Extreme expansion (very suspicious for .text)
+        if ratio > 10 and section_name == ".text":
+            return 40, "🔴 CRITICAL (10x+ expansion - packed code)"
+        elif ratio > 5 and section_name == ".text":
+            return 35, "🔴 Very High (5x+ expansion - likely packed)"
+        elif ratio > 3 and section_name == ".text":
+            return 25, "⚠️ High (3x+ expansion - possible packing)"
+
+        # Moderate expansion
+        elif ratio > max_ratio:
+            if section_name == ".text":
+                return 20, "⚠️ Moderate expansion (check for packing)"
+            else:
+                return 10, "Slight expansion (possibly normal)"
+
+        # Normal ratio
+        elif min_ratio <= ratio <= max_ratio:
+            return 0, "Normal (1:1 ratio)"
+
+        # Compression (rare, but possible)
+        elif ratio < min_ratio:
+            return 5, "Compressed on disk (unusual)"
+
+        return 0, "Normal"
+
+    @classmethod
+    def _score_permissions(cls, perms: str, section_name: str) -> Tuple[int, str]:
+        """
+        Score permissions (0-30 points).
+        Returns (score, status_description)
+        """
+        has_r = "R" in perms
+        has_w = "W" in perms
+        has_x = "X" in perms
+
+        # W+X is very suspicious (self-modifying code)
+        if has_w and has_x:
+            return 30, "🔴 CRITICAL (W+X - Self-modifying code)"
+
+        # Executable data section (suspicious)
+        if has_x and section_name in [".data", ".rdata"]:
+            return 20, "⚠️ Suspicious (Executable data section)"
+
+        # Writable code section (unusual but less critical than W+X)
+        if has_w and section_name == ".text":
+            return 15, "⚠️ Unusual (Writable code section)"
+
+        # Non-executable code section (weird but not dangerous)
+        if not has_x and section_name == ".text":
+            return 5, "Unusual (Non-executable code)"
+
+        # Normal permissions
+        return 0, "Normal"
+
+    @classmethod
+    def _calculate_suspicion_score(
+        cls, entropy_score: int, size_score: int, perm_score: int, section_name: str
+    ) -> int:
+        """
+        Combine individual scores into overall suspicion score (0-100).
+        Uses weighted combination and correlation bonuses.
+        """
+        base_score = entropy_score + size_score + perm_score
+
+        # Correlation bonus: High entropy + high expansion = likely packing
+        if entropy_score >= 25 and size_score >= 25 and section_name == ".text":
+            correlation_bonus = 20
+        # Medium correlation
+        elif entropy_score >= 15 and size_score >= 15:
+            correlation_bonus = 10
+        else:
+            correlation_bonus = 0
+
+        total = min(100, base_score + correlation_bonus)
+        return total
+
+    @classmethod
+    def _generate_warnings(
+        cls,
+        name: str,
+        entropy: float,
+        ratio: float,
+        perms: str,
+        entropy_score: int,
+        size_score: int,
+        perm_score: int,
+    ) -> list:
+        """Generate human-readable warnings"""
+        warnings = []
+
+        if entropy_score >= 25:
+            warnings.append(
+                f"High entropy ({entropy:.2f}) suggests encryption or packing"
+            )
+
+        if size_score >= 25 and name == ".text":
+            warnings.append(
+                f"Section expands {ratio:.1f}x in memory - likely packed code"
+            )
+
+        if perm_score >= 20:
+            warnings.append(
+                f"Dangerous permissions ({perms}) - possible code injection"
+            )
+
+        if entropy_score >= 15 and size_score >= 15:
+            warnings.append(
+                "Combined high entropy + expansion strongly indicates packing"
+            )
+
+        return warnings
+
+    @staticmethod
+    def _get_suspicion_level(score: int) -> str:
+        """Convert numeric score to threat level"""
+        if score >= 80:
+            return "CRITICAL"
+        elif score >= 60:
+            return "HIGH"
+        elif score >= 40:
+            return "MEDIUM"
+        elif score >= 20:
+            return "LOW"
+        else:
+            return "CLEAN"
+
+    @classmethod
+    def analyze_section(cls, section: Dict) -> SectionAnalysis:
+        """Enhanced analysis with segment-level entropy checking"""
+        name = section["name"]
+        data = section["data"]
+        vsize = section["virtual_size"]
+        rsize = section["raw_size"]
+        perms = section["permissions"]
+
+        # Overall entropy (existing)
+        overall_entropy = EntropyAnalyzer.calculate(data)
+
+        # NEW: Segment-level entropy analysis
+        segment_analysis = SegmentEntropyAnalyzer.analyze_segments(data)
+
+        # Calculate metrics
+        size_ratio = vsize / rsize if rsize > 0 else float("inf")
+
+        # Score components
+        entropy_score, entropy_status = cls._score_entropy(overall_entropy, name)
+        size_score, size_status = cls._score_size_ratio(size_ratio, name, rsize)
+        perm_score, perm_status = cls._score_permissions(perms, name)
+
+        # NEW: Score segment entropy anomalies
+        segment_score, segment_status = cls._score_segment_entropy(
+            segment_analysis, name
+        )
+
+        # Combine scores (now includes segment analysis)
+        suspicion_score = cls._calculate_suspicion_score(
+            entropy_score, size_score, perm_score, segment_score, name
+        )
+
+        # Generate warnings
+        warnings = cls._generate_warnings(
+            name,
+            overall_entropy,
+            size_ratio,
+            perms,
+            entropy_score,
+            size_score,
+            perm_score,
+            segment_score,
+            segment_analysis,
+        )
+
+        suspicion_level = cls._get_suspicion_level(suspicion_score)
+        is_suspicious = suspicion_score >= 50
+
+        return SectionAnalysis(
+            name=name,
+            entropy=overall_entropy,
+            entropy_status=entropy_status,
+            size_ratio=size_ratio,
+            size_status=size_status,
+            permissions=perms,
+            permission_status=perm_status,
+            suspicion_score=suspicion_score,
+            suspicion_level=suspicion_level,
+            warnings=warnings,
+            is_suspicious=is_suspicious,
+            segment_analysis=segment_analysis,  # Add this field
+        )
+
+    @classmethod
+    def _score_segment_entropy(
+        cls, segment_analysis: Dict, section_name: str
+    ) -> Tuple[int, str]:
+        """
+        Score segment entropy anomalies (0-35 points).
+        This catches padding-based evasion.
+        """
+        if not segment_analysis["has_anomaly"]:
+            return 0, "Uniform entropy distribution"
+
+        # Anomaly detected - assign score based on severity
+        reason = segment_analysis["anomaly_reason"]
+
+        if "PADDING EVASION" in reason:
+            return 35, f"🔴 {reason}"
+        elif "BIMODAL DISTRIBUTION" in reason:
+            return 30, f"🔴 {reason}"
+        elif "FRONT-LOADED PACKING" in reason:
+            return 30, f"🔴 {reason}"
+        elif "HIGH ENTROPY VARIANCE" in reason:
+            return 20, f"⚠️ {reason}"
+
+        return 15, f"⚠️ Entropy anomaly detected"
+
+    @classmethod
+    def _calculate_suspicion_score(
+        cls,
+        entropy_score: int,
+        size_score: int,
+        perm_score: int,
+        segment_score: int,
+        section_name: str,
+    ) -> int:
+        """Updated to include segment score"""
+        base_score = entropy_score + size_score + perm_score + segment_score
+
+        # Correlation bonus: Overall low entropy BUT segment anomaly = evasion
+        if entropy_score < 15 and segment_score >= 25:
+            correlation_bonus = 25  # This is the key insight!
+        # High entropy + high expansion (existing check)
+        elif entropy_score >= 25 and size_score >= 25 and section_name == ".text":
+            correlation_bonus = 20
+        elif entropy_score >= 15 and size_score >= 15:
+            correlation_bonus = 10
+        else:
+            correlation_bonus = 0
+
+        total = min(100, base_score + correlation_bonus)
+        return total
+
+    @classmethod
+    def _generate_warnings(
+        cls,
+        name: str,
+        entropy: float,
+        ratio: float,
+        perms: str,
+        entropy_score: int,
+        size_score: int,
+        perm_score: int,
+        segment_score: int,
+        segment_analysis: Dict,
+    ) -> list:
+        """Updated to include segment warnings"""
+        warnings = []
+
+        # Existing warnings
+        if entropy_score >= 25:
+            warnings.append(f"High overall entropy ({entropy:.2f})")
+
+        if size_score >= 25 and name == ".text":
+            warnings.append(f"Section expands {ratio:.1f}x in memory")
+
+        if perm_score >= 20:
+            warnings.append(f"Dangerous permissions ({perms})")
+
+        # NEW: Segment-level warnings
+        if segment_score >= 20:
+            warnings.append(segment_analysis["anomaly_reason"])
+
+        # NEW: Evasion detection
+        if entropy_score < 15 and segment_score >= 25:
+            warnings.append(
+                "⚠️ EVASION ATTEMPT: Overall entropy appears normal, but "
+                "chunk analysis reveals padding-based obfuscation"
+            )
+
+        return warnings
