@@ -3,8 +3,29 @@ import code
 import sys
 from capstone import *
 import pefile
+import math
 import tkinter as tk
 from tkinter import filedialog
+
+
+def calculate_entropy(data):
+    """Returns Shannon Entropy of data (0.0 to 8.0)"""
+    if not data:
+        return 0.0
+    entropy = 0
+    # Create frequency list for all 256 possible byte values
+    for x in range(256):
+        p_x = float(data.count(x)) / len(data)
+        if p_x > 0:
+            entropy += -p_x * math.log(p_x, 2)
+    return entropy
+
+
+def get_file_entropy(path):
+    with open(path, "rb") as f:
+        data = f.read()
+    return calculate_entropy(data)
+
 
 # Open file dialog
 root = tk.Tk()
@@ -56,6 +77,8 @@ def disasm_n_instructions(pe, rva, count=100):
         )
         if len(instructions) >= count:
             break
+        if instruction.mnemonic == "":
+            print(f"Dead/Invalid code found at {hex(instruction.address)}")
 
     return instructions
 
@@ -97,10 +120,12 @@ def disasm_code_section(pe):
 def analyze_binary():
     """Perform full binary analysis"""
     entry_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
+    global_entropy = get_file_entropy(file_path)  # Calculate for the whole file
     entry_disasm = disasm_n_instructions(pe, entry_rva, count=200)
     text_disasm = disasm_code_section(pe)
 
     return {
+        "global_entropy": global_entropy,
         "entry_point": {
             "address": f"0x{entry_rva:x}",
             "instructions": entry_disasm,
@@ -173,9 +198,18 @@ def show_sections():
     print("-" * 60)
     for section in pe.sections:
         name = section.Name.decode().rstrip("\x00")
+        data = section.get_data()
+        entropy = calculate_entropy(data)
+        status = "Normal"
+        if entropy > 7.2:
+            status = "PACKED/ENCRYPTED"
+        elif entropy < 1.0:
+            status = "PADDING/EMPTY"
+        elif name == ".text" and entropy > 6.8:
+            status = "High (Check for Obfuscation)"
         print(
             f"{name:<12} {hex(section.VirtualAddress):<12} "
-            f"{section.Misc_VirtualSize:<12} {section.SizeOfRawData:<12}"
+            f"{section.Misc_VirtualSize:<12} {section.SizeOfRawData:<12} {entropy:<10.2f} {status}"
         )
 
 
