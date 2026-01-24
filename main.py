@@ -65,6 +65,34 @@ if is_upx:
     print("Static disassembly and string search will be inaccurate.")
 
 
+def check_stealth_packing(pe):
+    print("\n--- Stealth Analysis ---")
+    for section in pe.sections:
+        # Check for the Virtual vs Raw Size Gap
+        # If VirtualSize is much bigger than RawSize, it's a 'loading' area
+        if section.Misc_VirtualSize > (section.SizeOfRawData * 3):
+            name = section.Name.decode().rstrip("\x00")
+            print(f"[!] Warning: Section {name} expands significantly in RAM.")
+            print(f"    Possible 'Code Unfolding' detected.")
+
+    # Check for weird alignment
+    if pe.OPTIONAL_HEADER.SectionAlignment < 0x1000:
+        print(
+            f"[!] Warning: Non-standard Section Alignment: {hex(pe.OPTIONAL_HEADER.SectionAlignment)}"
+        )
+
+
+def get_section_permissions(characteristics):
+    perms = ""
+    if characteristics & 0x40000000:
+        perms += "R"
+    if characteristics & 0x80000000:
+        perms += "W"
+    if characteristics & 0x20000000:
+        perms += "X"
+    return perms
+
+
 def get_architecture(pe):
     """Detect PE architecture"""
     machine = pe.FILE_HEADER.Machine
@@ -135,9 +163,12 @@ def analyze_binary():
     """Perform full binary analysis"""
     entry_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
     global_entropy = get_file_entropy(file_path)  # Calculate for the whole file
+
     entry_disasm = disasm_n_instructions(pe, entry_rva, count=200)
     text_disasm = disasm_code_section(pe)
-
+    if check_signature_directory():
+        print("File is signed.")
+    check_stealth_packing(pe)
     return {
         "global_entropy": global_entropy,
         "entry_point": {
@@ -206,25 +237,82 @@ def show_imports():
         print("No imports found")
 
 
+def classify_entropy(entropy, section_name):
+    """Classify section based on entropy with context"""
+
+    # Adjust thresholds based on section type
+    if section_name == ".text":
+        if entropy > 6.8:
+            return "High Entropy (Possible Obfuscation/Packing)"
+        elif entropy < 4.0:
+            return "Low Entropy (Sparse Code/Debugging)"
+        else:
+            return "Normal Code"
+
+    elif section_name in [".data", ".rdata"]:
+        if entropy > 7.5:
+            return "ENCRYPTED/COMPRESSED DATA"
+        elif entropy < 2.0:
+            return "Mostly Zeros/Padding"
+        else:
+            return "Normal Data"
+
+    elif section_name == ".rsrc":
+        # Resources naturally have high entropy (images, etc.)
+        if entropy > 7.8:
+            return "High (May Contain Compressed Resources)"
+        else:
+            return "Normal Resources"
+
+    else:
+        if entropy > 7.2:
+            return "PACKED/ENCRYPTED"
+        elif entropy < 1.0:
+            return "EMPTY/PADDING"
+        else:
+            return "Normal"
+
+
 def show_sections():
-    """Display sections"""
-    print(f"\n{'Section':<12} {'VirtAddr':<12} {'VirtSize':<12} {'RawSize':<12}")
-    print("-" * 60)
+    """Display sections with detailed analysis"""
+    print(
+        f"\n{'Section':<12} {'VirtAddr':<12} {'VirtSize':<12} {'RawSize':<12} {'Perms':<6} {'Entropy':<8} {'Status'}"
+    )
+    print("-" * 100)
+
     for section in pe.sections:
+        perms = get_section_permissions(section.Characteristics)
         name = section.Name.decode().rstrip("\x00")
         data = section.get_data()
         entropy = calculate_entropy(data)
-        status = "Normal"
-        if entropy > 7.2:
-            status = "PACKED/ENCRYPTED"
-        elif entropy < 1.0:
-            status = "PADDING/EMPTY"
-        elif name == ".text" and entropy > 6.8:
-            status = "High (Check for Obfuscation)"
+
+        # Classify based on multiple factors
+        status = classify_entropy(entropy, name)
+
+        # Override with more specific warnings
+        if "W" in perms and "X" in perms:
+            status = "⚠️  W+X (SELF-MODIFYING CODE)"
+
         print(
             f"{name:<12} {hex(section.VirtualAddress):<12} "
-            f"{section.Misc_VirtualSize:<12} {section.SizeOfRawData:<12} {entropy:<10.2f} {status}"
+            f"{section.Misc_VirtualSize:<12} {section.SizeOfRawData:<12} "
+            f"{perms:<6} {entropy:<8.2f} {status}"
         )
+
+
+def check_signature_directory():
+    """Check if the file has a security directory (signature)"""
+    # Look for the Security Directory index (Entry 4)
+    security_dir = pe.OPTIONAL_HEADER.DATA_DIRECTORY[
+        pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_SECURITY"]
+    ]
+
+    if security_dir.VirtualAddress > 0 and security_dir.Size > 0:
+        print(f"[+] File has a Digital Signature (Size: {security_dir.Size} bytes)")
+        return True
+    else:
+        print("[!] WARNING: File is UNSIGNED (No security directory found)")
+        return False
 
 
 # Run analysis
