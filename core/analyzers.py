@@ -506,21 +506,6 @@ class PackerDetector:
 
         return detected
 
-    @staticmethod
-    def detect_stealth_packing(sections: List[Dict]) -> List[str]:
-        """Detect stealth packing techniques"""
-        warnings = []
-
-        for section in sections:
-            # Virtual size much larger than raw size
-            if section["virtual_size"] > (section["raw_size"] * 3):
-                warnings.append(
-                    f"Section {section['name']} expands significantly in RAM "
-                    f"(VSize: {section['virtual_size']}, RawSize: {section['raw_size']})"
-                )
-
-        return warnings
-
 
 class StringExtractor:
     """Extract printable strings from binary data"""
