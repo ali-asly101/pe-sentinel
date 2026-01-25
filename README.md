@@ -34,7 +34,8 @@ The analysis engine groups identified traits into four primary pillars to explai
 * **Stealth:** Indicators of obfuscation, anti-debugging, or anti-VM techniques.
 * **Integrity:** Evaluation of trust signals like file signatures and metadata consistency.
 * **Intent:** Identifying behavioral contradictions, such as binaries with network capabilities but no user interface.
-![Uploading image.png…]()
+<img width="1319" height="594" alt="image" src="https://github.com/user-attachments/assets/b9c35df4-bc72-42e4-883d-2540d873ce87" />
+
 
 ## Heuristic Weighting Logic
 
