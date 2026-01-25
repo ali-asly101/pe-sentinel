@@ -43,39 +43,6 @@ class EntropyAnalyzer:
 
         return entropy
 
-    @staticmethod
-    def classify(entropy: float, section_name: str) -> str:
-        """Classify entropy based on section context"""
-        if section_name == ".text":
-            if entropy > 6.8:
-                return "High Entropy (Possible Obfuscation/Packing)"
-            elif entropy < 4.0:
-                return "Low Entropy (Sparse Code/Debugging)"
-            else:
-                return "Normal Code"
-
-        elif section_name in [".data", ".rdata"]:
-            if entropy > 7.5:
-                return "ENCRYPTED/COMPRESSED DATA"
-            elif entropy < 2.0:
-                return "Mostly Zeros/Padding"
-            else:
-                return "Normal Data"
-
-        elif section_name == ".rsrc":
-            if entropy > 7.8:
-                return "High (May Contain Compressed Resources)"
-            else:
-                return "Normal Resources"
-
-        else:
-            if entropy > 7.2:
-                return "PACKED/ENCRYPTED"
-            elif entropy < 1.0:
-                return "EMPTY/PADDING"
-            else:
-                return "Normal"
-
 
 class SegmentEntropyAnalyzer:
     """

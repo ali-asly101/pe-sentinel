@@ -188,12 +188,11 @@ def main():
         if analysis.segment_analysis["has_anomaly"]:
             print(f"\n⚠️ SEGMENT ANOMALY DETECTED:")
             print(f"  {analysis.segment_analysis['anomaly_reason']}")
-            print(
-                f"\nEntropy Distribution (by {analysis.segment_analysis['chunk_size_kb']:.0f} KB chunks):"
-            )
+            print(f"\nEntropy Distribution:")
             viz = SegmentEntropyAnalyzer.visualize_entropy_distribution(
                 analysis.segment_analysis["entropies"],
                 analysis.segment_analysis["chunk_size_kb"],
+                section_name=analysis.name,  # ← Pass section name!
             )
             print(viz)
         else:
