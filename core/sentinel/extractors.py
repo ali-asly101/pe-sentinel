@@ -1,6 +1,5 @@
 """
 Phase 1: Feature Extraction
-Extracts ONLY features NOT already in analyzers.py
 - IAT analysis
 - Trust signals
 - UI indicators

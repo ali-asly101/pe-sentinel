@@ -51,7 +51,7 @@ class IndiscrepancyFilter:
         # ======================================
         # Check 3: Minimal Imports (Manual Resolution)
         # ======================================
-        if iat["total_imports"] <= 5 and iat["critical_loaders"]:
+        if iat["total_imports"] <= 5 and iat.get("has_critical_loaders", False):
             score += 20
             reasons.append(
                 f"MINIMAL IMPORTS: Only {iat['total_imports']} imports with manual loaders (hiding behavior)"
@@ -95,19 +95,72 @@ class IndiscrepancyFilter:
 
 
 class VerdictEngine:
-    """Final verdict generator"""
+    """Final verdict generator with threat attribution"""
 
     @staticmethod
-    def generate_verdict(features: Dict, correlation: Dict) -> Dict:
+    def get_score_attribution(
+        features: Dict,
+        correlation: Dict,
+        indiscrepancy_score: int,
+        structural_score: int,
+    ) -> Tuple[Dict, str]:
+        """
+        Calculate threat score attribution across four pillars.
+
+        Returns:
+            (attribution_dict, primary_driver)
+        """
+        # Map scores to threat pillars
+        attribution = {
+            "Capabilities": min(50, correlation["total_capability_score"]),  # Cap at 50
+            "Stealth": min(
+                40, int(correlation["obfuscation_multiplier"] * 15)
+            ),  # Obfuscation + structural
+            "Integrity": 0,  # Will calculate below
+            "Intent": min(30, indiscrepancy_score),  # Behavioral contradictions
+        }
+
+        # Calculate Integrity score (trust deficit)
+        integrity_score = 0
+        if not features["trust_signals"]["has_signature"]:
+            integrity_score += 15
+        if not features["trust_signals"]["has_bulk"]:
+            integrity_score += 10
+        if structural_score > 60:  # High structural anomaly
+            integrity_score += 15
+
+        attribution["Integrity"] = min(40, integrity_score)
+
+        # Calculate Stealth more accurately
+        stealth_score = 0
+        if correlation["is_obfuscated"]:
+            stealth_score += 20
+        if features["iat_analysis"]["ordinal_ratio"] > 0.3:
+            stealth_score += 15
+        if structural_score > 50:
+            stealth_score += 15
+
+        attribution["Stealth"] = min(40, stealth_score)
+
+        # Determine primary threat driver
+        primary_driver = max(attribution, key=attribution.get)
+
+        return attribution, primary_driver
+
+    @staticmethod
+    def generate_verdict(
+        features: Dict, correlation: Dict, structural_score: int = 0
+    ) -> Dict:
         """
         Generate final verdict by combining all phases.
 
         Args:
             features: From FeatureExtractor
             correlation: From CorrelationEngine
+            structural_score: From section analysis
 
         Returns:
-            Comprehensive threat assessment
+            Comprehensive threat assessment with attribution
         """
         # Phase 3a: Indiscrepancy scoring
         indiscrepancy_score, indiscrepancy_reasons = (
@@ -124,6 +177,11 @@ class VerdictEngine:
 
         # Cap at 100
         final_score = min(100, final_score)
+
+        # Get attribution
+        attribution, primary_driver = VerdictEngine.get_score_attribution(
+            features, correlation, indiscrepancy_score, structural_score
+        )
 
         # Determine threat level
         if final_score >= 80:
@@ -177,4 +235,6 @@ class VerdictEngine:
             "correlation": correlation,
             "indiscrepancy_score": indiscrepancy_score,
             "is_likely_malicious": final_score >= 60,
+            "attribution": attribution,
+            "primary_driver": primary_driver,
         }

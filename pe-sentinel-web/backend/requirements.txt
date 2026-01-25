@@ -1,0 +1,5 @@
+Flask==3.0.0
+flask-cors==4.0.0
+pefile==2023.2.7
+capstone==5.0.1
+Werkzeug==3.0.1

@@ -1,0 +1,105 @@
+/* Enhanced PE-Sentinel Theme Engine */
+:root {
+    /* --- DARK THEME (Default) --- */
+    --bg-main: #0f1117;
+    --bg-card: #1a1d29;
+    --bg-card-hover: #242938;
+    --border: rgba(255, 255, 255, 0.08);
+    --text-primary: #e4e6eb;
+    --text-secondary: #b0b3b8;
+    --text-muted: #6d6f75;
+    
+    /* Accents (Muted for Professionalism) */
+    --primary: #667eea;
+    --primary-glow: rgba(102, 126, 234, 0.3);
+    --danger: #ff5f57;
+    --success: #3fb950;
+    
+    /* Gradients - Used only for headers/buttons */
+    --grad-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --grad-danger: linear-gradient(135deg, #ff5f57 0%, #ba2d2d 100%);
+}
+
+/* --- LIGHT THEME OVERRIDES --- */
+[data-theme="light"] {
+    --bg-main: #f0f2f5;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f8f9fa;
+    --border: rgba(0, 0, 0, 0.1);
+    --text-primary: #1c1e21;
+    --text-secondary: #444950;
+    --text-muted: #8d949e;
+    
+    --primary-glow: rgba(102, 126, 234, 0.15);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    transition: background 0.3s ease, color 0.3s ease;
+    line-height: 1.6;
+}
+
+/* Glass Dashboard Container */
+.container-main {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 0 20px;
+}
+
+/* Clean, Bento-style Cards */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    transition: transform 0.2s ease, border 0.2s ease;
+}
+
+.card:hover {
+    border-color: var(--primary);
+    transform: translateY(-2px);
+}
+
+.card-header {
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Specialized Score Badge */
+.threat-score-display {
+    font-size: 3.5rem;
+    font-weight: 900;
+    background: var(--grad-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-align: center;
+}
+
+/* Theme Toggle Button Style */
+.theme-btn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    z-index: 1000;
+}
