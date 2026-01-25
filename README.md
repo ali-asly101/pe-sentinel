@@ -2,6 +2,7 @@
 
 PE-Sentinel is a high-fidelity static analysis tool designed for the decomposition and forensic inspection of Windows Portable Executable (PE) files. It extracts structural metadata, calculates entropy distribution, and maps behavioral indicators to provide a comprehensive **Binary DNA** profile.
 
+<img width="1242" height="840" alt="image" src="https://github.com/user-attachments/assets/6cd2ca7e-a6f9-4db2-8fb4-2a76071a8aec" />
 
 
 ## Core Philosophy: Evidence-Based Analysis
@@ -33,6 +34,7 @@ The analysis engine groups identified traits into four primary pillars to explai
 * **Stealth:** Indicators of obfuscation, anti-debugging, or anti-VM techniques.
 * **Integrity:** Evaluation of trust signals like file signatures and metadata consistency.
 * **Intent:** Identifying behavioral contradictions, such as binaries with network capabilities but no user interface.
+![Uploading image.png…]()
 
 ## Heuristic Weighting Logic
 
