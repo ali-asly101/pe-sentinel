@@ -1,17 +1,23 @@
 """
 Phase 3: Indiscrepancy Filter & Final Verdict
-Detects contradictions and applies trust reduction
+Detects contradictions and applies trust reduction.
+Now integrates string analysis results.
 """
 
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
+
+from ..config import AnalysisConfig, DEFAULT_CONFIG
+from ..string_analyzer import StringAnalysisResult
 
 
 class IndiscrepancyFilter:
     """Detect contradictions that indicate malicious intent"""
 
-    @staticmethod
+    def __init__(self, config: AnalysisConfig = None):
+        self.config = config or DEFAULT_CONFIG
+
     def calculate_indiscrepancy_score(
-        features: Dict, correlation: Dict
+        self, features: Dict, correlation: Dict
     ) -> Tuple[int, List[str]]:
         """
         Calculate indiscrepancy score based on contradictions.
@@ -24,6 +30,7 @@ class IndiscrepancyFilter:
         ui_indicators = features["ui_indicators"]
         trust_signals = features["trust_signals"]
         iat = features["iat_analysis"]
+        export_analysis = features.get("export_analysis", {})
 
         # ======================================
         # Check 1: "Headless" Network Binary
@@ -51,7 +58,7 @@ class IndiscrepancyFilter:
         # ======================================
         # Check 3: Minimal Imports (Manual Resolution)
         # ======================================
-        if iat["total_imports"] <= 5 and iat.get("has_critical_loaders", False):
+        if iat.get("is_minimal", False) and iat.get("has_critical_loaders", False):
             score += 20
             reasons.append(
                 f"MINIMAL IMPORTS: Only {iat['total_imports']} imports with manual loaders (hiding behavior)"
@@ -60,7 +67,7 @@ class IndiscrepancyFilter:
         # ======================================
         # Check 4: Ordinal Hiding
         # ======================================
-        if iat["ordinal_ratio"] > 0.3:  # >30% imports by ordinal
+        if iat.get("is_ordinal_heavy", False):
             score += 15
             reasons.append(
                 f"ORDINAL HIDING: {iat['ordinal_ratio']*100:.0f}% of imports by ordinal (evading string detection)"
@@ -69,55 +76,104 @@ class IndiscrepancyFilter:
         # ======================================
         # Check 5: No Imports at All
         # ======================================
-        if not iat["has_imports"]:
+        if not iat.get("has_imports", True):
             score += 25
             reasons.append(
                 "NO IMPORTS: Binary has no import table (packed or self-contained)"
             )
 
-        return score, reasons
+        # ======================================
+        # Check 6: Suspicious Exports (NEW)
+        # ======================================
+        if export_analysis.get("is_suspicious", False):
+            for reason in export_analysis.get("suspicion_reasons", []):
+                score += 10
+                reasons.append(f"EXPORT ANOMALY: {reason}")
 
-    @staticmethod
-    def apply_trust_reduction(base_score: int, features: Dict) -> Tuple[int, str]:
+        # ======================================
+        # Check 7: Console app with GUI capabilities but network
+        # ======================================
+        if (
+            ui_indicators.get("is_console_subsystem")
+            and ui_indicators.get("has_network_dlls")
+            and not ui_indicators.get("has_ui_dlls")
+        ):
+            # Console + network + no UI is common for malware
+            if has_dangerous_capabilities:
+                score += 15
+                reasons.append(
+                    "CONSOLE DROPPER: Console subsystem with network but no UI + dangerous capabilities"
+                )
+
+        return min(self.config.scoring.max_indiscrepancy_score, score), reasons
+
+    def apply_trust_reduction(
+        self, base_score: int, features: Dict
+    ) -> Tuple[int, str, float]:
         """
         Apply trust-based score reduction.
 
-        Rule: If digitally signed, reduce score by 80% (trust but verify)
+        IMPROVED: More nuanced reduction based on multiple trust signals.
         """
         trust_signals = features["trust_signals"]
 
-        if trust_signals["has_signature"]:
-            reduced_score = int(base_score * 0.2)  # 80% reduction
-            reason = f"Score reduced from {base_score} to {reduced_score} due to valid digital signature"
-            return reduced_score, reason
+        # Use pre-calculated trust multiplier from extractor
+        multiplier = trust_signals.get("trust_multiplier", 1.0)
+        trust_level = trust_signals.get("trust_level", "LOW")
 
-        return base_score, "No trust reduction applied (unsigned binary)"
+        if multiplier < 1.0:
+            reduced_score = int(base_score * multiplier)
+            reduction_pct = (1 - multiplier) * 100
+
+            reason = (
+                f"Trust reduction: {reduction_pct:.0f}% "
+                f"(Level: {trust_level}, "
+                f"Score: {base_score} → {reduced_score})"
+            )
+
+            trust_reasons = trust_signals.get("trust_reasons", [])
+            if trust_reasons:
+                reason += f"\n  Factors: {', '.join(trust_reasons)}"
+
+            return reduced_score, reason, multiplier
+
+        return (
+            base_score,
+            "No trust reduction (unsigned or insufficient trust signals)",
+            1.0,
+        )
 
 
 class VerdictEngine:
     """Final verdict generator with threat attribution"""
 
-    @staticmethod
+    def __init__(self, config: AnalysisConfig = None):
+        self.config = config or DEFAULT_CONFIG
+        self.indiscrepancy_filter = IndiscrepancyFilter(config)
+
     def get_score_attribution(
+        self,
         features: Dict,
         correlation: Dict,
         indiscrepancy_score: int,
         structural_score: int,
+        string_score: int = 0,
     ) -> Tuple[Dict, str]:
         """
-        Calculate threat score attribution across four pillars.
+        Calculate threat score attribution across five pillars.
 
         Returns:
             (attribution_dict, primary_driver)
         """
+        cfg = self.config.scoring
+
         # Map scores to threat pillars
         attribution = {
-            "Capabilities": min(50, correlation["total_capability_score"]),  # Cap at 50
-            "Stealth": min(
-                40, int(correlation["obfuscation_multiplier"] * 15)
-            ),  # Obfuscation + structural
+            "Capabilities": min(50, correlation["total_capability_score"]),
+            "Stealth": 0,  # Will calculate below
             "Integrity": 0,  # Will calculate below
-            "Intent": min(30, indiscrepancy_score),  # Behavioral contradictions
+            "Intent": min(30, indiscrepancy_score),
+            "Strings": min(30, string_score),  # NEW
         }
 
         # Calculate Integrity score (trust deficit)
@@ -126,16 +182,16 @@ class VerdictEngine:
             integrity_score += 15
         if not features["trust_signals"]["has_bulk"]:
             integrity_score += 10
-        if structural_score > 60:  # High structural anomaly
+        if structural_score > 60:
             integrity_score += 15
 
         attribution["Integrity"] = min(40, integrity_score)
 
-        # Calculate Stealth more accurately
+        # Calculate Stealth score
         stealth_score = 0
         if correlation["is_obfuscated"]:
             stealth_score += 20
-        if features["iat_analysis"]["ordinal_ratio"] > 0.3:
+        if features["iat_analysis"].get("is_ordinal_heavy", False):
             stealth_score += 15
         if structural_score > 50:
             stealth_score += 15
@@ -147,9 +203,12 @@ class VerdictEngine:
 
         return attribution, primary_driver
 
-    @staticmethod
     def generate_verdict(
-        features: Dict, correlation: Dict, structural_score: int = 0
+        self,
+        features: Dict,
+        correlation: Dict,
+        structural_score: int = 0,
+        string_analysis: Optional[StringAnalysisResult] = None,
     ) -> Dict:
         """
         Generate final verdict by combining all phases.
@@ -158,39 +217,55 @@ class VerdictEngine:
             features: From FeatureExtractor
             correlation: From CorrelationEngine
             structural_score: From section analysis
+            string_analysis: From StringAnalyzer (NEW)
 
         Returns:
             Comprehensive threat assessment with attribution
         """
+        cfg = self.config.scoring
+
         # Phase 3a: Indiscrepancy scoring
         indiscrepancy_score, indiscrepancy_reasons = (
-            IndiscrepancyFilter.calculate_indiscrepancy_score(features, correlation)
+            self.indiscrepancy_filter.calculate_indiscrepancy_score(
+                features, correlation
+            )
         )
 
+        # String analysis score
+        string_score = 0
+        string_reasons = []
+        if string_analysis:
+            string_score = min(40, string_analysis.suspicious_score)
+            string_reasons = string_analysis.warnings
+
         # Calculate base threat score
-        base_score = correlation["total_capability_score"] + indiscrepancy_score
+        base_score = (
+            correlation["total_capability_score"]
+            + indiscrepancy_score
+            + int(string_score * 0.5)  # Weight string score at 50%
+        )
 
         # Phase 3b: Trust reduction
-        final_score, trust_note = IndiscrepancyFilter.apply_trust_reduction(
-            base_score, features
+        final_score, trust_note, trust_multiplier = (
+            self.indiscrepancy_filter.apply_trust_reduction(base_score, features)
         )
 
         # Cap at 100
-        final_score = min(100, final_score)
+        final_score = min(cfg.max_total_score, final_score)
 
         # Get attribution
-        attribution, primary_driver = VerdictEngine.get_score_attribution(
-            features, correlation, indiscrepancy_score, structural_score
+        attribution, primary_driver = self.get_score_attribution(
+            features, correlation, indiscrepancy_score, structural_score, string_score
         )
 
         # Determine threat level
-        if final_score >= 80:
+        if final_score >= cfg.critical_threshold:
             threat_level = "CRITICAL"
-        elif final_score >= 60:
+        elif final_score >= cfg.high_threshold:
             threat_level = "HIGH"
-        elif final_score >= 40:
+        elif final_score >= cfg.medium_threshold:
             threat_level = "MEDIUM"
-        elif final_score >= 20:
+        elif final_score >= cfg.low_threshold:
             threat_level = "LOW"
         else:
             threat_level = "CLEAN"
@@ -208,8 +283,9 @@ class VerdictEngine:
                     if cap["is_obfuscated"]
                     else ""
                 )
+                conf_note = f" [{cap['confidence']*100:.0f}% confidence]"
                 all_reasons.append(
-                    f"  • {cap['description']}: {cap['final_score']} pts{obf_note}"
+                    f"  • {cap['description']}: {cap['final_score']} pts{obf_note}{conf_note}"
                 )
 
         if correlation["is_obfuscated"]:
@@ -220,12 +296,22 @@ class VerdictEngine:
                 all_reasons.append(f"  • {reason}")
 
         if indiscrepancy_reasons:
-            all_reasons.append("Indiscrepancy indicators:")
+            all_reasons.append("Behavioral contradictions (indiscrepancy indicators):")
             for reason in indiscrepancy_reasons:
                 all_reasons.append(f"  • {reason}")
 
-        if features["trust_signals"]["has_signature"]:
+        if string_reasons:
+            all_reasons.append("Suspicious string patterns:")
+            for reason in string_reasons:
+                all_reasons.append(f"  • {reason}")
+
+        if trust_multiplier < 1.0:
             all_reasons.append(f"Trust signal: {trust_note}")
+
+        # Generate recommendations
+        recommendations = self._generate_recommendations(
+            threat_level, features, correlation, string_analysis
+        )
 
         return {
             "final_score": final_score,
@@ -234,7 +320,74 @@ class VerdictEngine:
             "reasons": all_reasons,
             "correlation": correlation,
             "indiscrepancy_score": indiscrepancy_score,
-            "is_likely_malicious": final_score >= 60,
+            "string_score": string_score,
+            "is_likely_malicious": final_score >= cfg.high_threshold,
             "attribution": attribution,
             "primary_driver": primary_driver,
+            "trust_multiplier": trust_multiplier,
+            "recommendations": recommendations,
+            "capability_summary": correlation.get("capability_summary", {}),
         }
+
+    def _generate_recommendations(
+        self,
+        threat_level: str,
+        features: Dict,
+        correlation: Dict,
+        string_analysis: Optional[StringAnalysisResult],
+    ) -> List[str]:
+        """Generate actionable recommendations based on findings"""
+        recommendations = []
+
+        if threat_level == "CRITICAL":
+            recommendations.append("🔴 IMMEDIATE ISOLATION required")
+            recommendations.append("🔴 Analyze in controlled sandbox environment")
+            recommendations.append("🔴 Report to security team immediately")
+            recommendations.append(
+                "🔴 Check for indicators of compromise (IOCs) on network"
+            )
+        elif threat_level == "HIGH":
+            recommendations.append("🟠 DO NOT EXECUTE on production systems")
+            recommendations.append("🟠 Perform detailed sandbox analysis")
+            recommendations.append("🟠 Review with security team before any action")
+        elif threat_level == "MEDIUM":
+            recommendations.append("🟡 Exercise caution before execution")
+            recommendations.append("🟡 Review manually for false positives")
+            recommendations.append("🟡 Monitor closely if executed")
+        elif threat_level == "LOW":
+            recommendations.append("🟢 Appears relatively safe")
+            recommendations.append("🟢 Standard security precautions apply")
+        else:
+            recommendations.append("✅ File appears legitimate")
+            recommendations.append("✅ No significant threats detected")
+
+        # Specific recommendations based on findings
+        cap_summary = correlation.get("capability_summary", {})
+
+        if "ransomware" in cap_summary.get("threat_categories", []):
+            recommendations.append(
+                "⚠️ RANSOMWARE INDICATORS: Ensure backups are current and isolated"
+            )
+
+        if "credential_theft" in cap_summary.get("threat_categories", []):
+            recommendations.append(
+                "⚠️ CREDENTIAL THEFT: Rotate passwords if file was executed"
+            )
+
+        if string_analysis and string_analysis.urls:
+            recommendations.append(
+                f"⚠️ Network IOCs: {len(string_analysis.urls)} URLs found - check firewall logs"
+            )
+
+        if string_analysis and string_analysis.ip_addresses:
+            external_ips = [
+                ip
+                for ip in string_analysis.ip_addresses
+                if not ip.startswith(("10.", "192.168.", "172.16.", "127.", "0."))
+            ]
+            if external_ips:
+                recommendations.append(
+                    f"⚠️ Network IOCs: {len(external_ips)} external IPs found"
+                )
+
+        return recommendations
