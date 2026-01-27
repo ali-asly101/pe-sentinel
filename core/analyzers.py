@@ -1,11 +1,14 @@
 """
-Various analysis functions: entropy, packer detection, strings, etc.
+Various analysis functions: entropy, packer detection, section analysis
+Now integrated with configuration layer.
 """
 
 import math
 import statistics
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
+
+from .config import AnalysisConfig, DEFAULT_CONFIG
 
 
 @dataclass
@@ -50,27 +53,32 @@ class SegmentEntropyAnalyzer:
     Catches padding-based evasion techniques.
     """
 
-    @staticmethod
-    def analyze_segments(data: bytes, chunk_size: int = 4096) -> Dict:
+    def __init__(self, config: AnalysisConfig = None):
+        self.config = config or DEFAULT_CONFIG
+
+    def analyze_segments(self, data: bytes, chunk_size: int = None) -> Dict:
         """
         Break section into chunks and analyze entropy distribution.
 
         Args:
             data: Section data bytes
-            chunk_size: Size of each chunk (default 4KB)
+            chunk_size: Size of each chunk (default from config)
 
         Returns:
             Dictionary with entropy statistics and anomaly flags
         """
+        if chunk_size is None:
+            chunk_size = self.config.entropy.chunk_size
+
         if len(data) < chunk_size:
-            # Section too small, analyze as whole
+            overall_entropy = EntropyAnalyzer.calculate(data)
             return {
                 "chunk_count": 1,
-                "entropies": [EntropyAnalyzer.calculate(data)],
-                "mean": EntropyAnalyzer.calculate(data),
+                "entropies": [overall_entropy],
+                "mean": overall_entropy,
                 "stddev": 0.0,
-                "max": EntropyAnalyzer.calculate(data),
-                "min": EntropyAnalyzer.calculate(data),
+                "max": overall_entropy,
+                "min": overall_entropy,
                 "variance": 0.0,
                 "has_anomaly": False,
                 "anomaly_reason": None,
@@ -107,7 +115,7 @@ class SegmentEntropyAnalyzer:
         variance = max_entropy - min_entropy
 
         # Detect anomalies
-        has_anomaly, reason = SegmentEntropyAnalyzer._detect_anomaly(
+        has_anomaly, reason = self._detect_anomaly(
             entropies, mean_entropy, stddev_entropy, variance
         )
 
@@ -124,15 +132,15 @@ class SegmentEntropyAnalyzer:
             "chunk_size_kb": chunk_size / 1024,
         }
 
-    @staticmethod
     def _detect_anomaly(
-        entropies: List[float], mean: float, stddev: float, variance: float
-    ) -> Tuple[bool, str]:
+        self, entropies: List[float], mean: float, stddev: float, variance: float
+    ) -> Tuple[bool, Optional[str]]:
         """Detect if entropy distribution indicates padding/packing evasion"""
+        cfg = self.config.entropy
 
-        # Pattern 1: High variance (>3.0 difference between max and min)
-        if variance > 3.0:
-            high_chunks = [e for e in entropies if e > 7.0]
+        # Pattern 1: High variance
+        if variance > cfg.variance_threshold:
+            high_chunks = [e for e in entropies if e > cfg.high]
             low_chunks = [e for e in entropies if e < 2.0]
 
             if high_chunks and low_chunks:
@@ -161,7 +169,7 @@ class SegmentEntropyAnalyzer:
             avg_first = statistics.mean(first_third)
             avg_last = statistics.mean(last_third)
 
-            if avg_first > 7.0 and avg_last < 2.0:
+            if avg_first > cfg.high and avg_last < 2.0:
                 return True, (
                     f"FRONT-LOADED PACKING: High start ({avg_first:.2f}) "
                     f"+ low end ({avg_last:.2f})"
@@ -173,17 +181,18 @@ class SegmentEntropyAnalyzer:
 
         return False, None
 
-    @staticmethod
     def visualize_entropy_distribution(
-        entropies: List[float], chunk_size_kb: float, section_name: str = None
+        self, entropies: List[float], chunk_size_kb: float, section_name: str = None
     ) -> str:
         """Create context-aware ASCII visualization"""
         if not entropies:
             return "No data"
 
+        cfg = self.config.entropy
+
         # Get expected range
         if section_name:
-            expected = SectionAnalyzer.EXPECTED_ENTROPY.get(section_name, (3.0, 7.0))
+            expected = cfg.section_ranges.get(section_name, (3.0, 7.0))
             min_expected, max_expected = expected
         else:
             min_expected, max_expected = 3.0, 7.0
@@ -193,8 +202,7 @@ class SegmentEntropyAnalyzer:
             bar_length = int(entropy / 8.0 * 40)
             bar = "█" * bar_length
 
-            # Dual markers: context-aware + absolute
-            # Context-aware (primary)
+            # Context-aware markers
             if entropy > max_expected + 0.5:
                 ctx_marker = "⚠️"
             elif entropy < min_expected:
@@ -202,29 +210,26 @@ class SegmentEntropyAnalyzer:
             else:
                 ctx_marker = "✓"
 
-            # Absolute threshold (secondary)
-            if entropy > 7.5:
-                abs_marker = "🔴"  # CRITICAL (universal)
-            elif entropy > 7.0:
-                abs_marker = "🟠"  # HIGH (universal)
-            elif entropy < 1.0:
-                abs_marker = "🔵"  # EMPTY (universal)
+            # Absolute threshold markers
+            if entropy > cfg.critical:
+                abs_marker = "🔴"
+            elif entropy > cfg.high:
+                abs_marker = "🟠"
+            elif entropy < cfg.empty:
+                abs_marker = "🔵"
             else:
                 abs_marker = ""
 
             offset_kb = i * chunk_size_kb
-
-            # Combine markers
             marker = f"{ctx_marker}{abs_marker}".ljust(3)
 
             bars.append(f"  {offset_kb:>6.0f} KB: {marker} {bar:<40} {entropy:.2f}")
 
-        # Add legend
         legend = (
             f"\n  Expected range for {section_name or 'section'}: "
             f"{min_expected:.1f} - {max_expected:.1f}\n"
             f"  ✓ = Within range | ⚠️ = Above range | ❄️ = Below range\n"
-            f"  🔴 = Critical (>7.5) | 🟠 = High (>7.0) | 🔵 = Empty (<1.0)"
+            f"  🔴 = Critical (>{cfg.critical}) | 🟠 = High (>{cfg.high}) | 🔵 = Empty (<{cfg.empty})"
         )
 
         return "\n".join(bars) + legend
@@ -233,26 +238,11 @@ class SegmentEntropyAnalyzer:
 class SectionAnalyzer:
     """Advanced section analysis combining entropy, size, and permissions"""
 
-    EXPECTED_ENTROPY = {
-        ".text": (4.5, 6.5),
-        ".data": (3.0, 6.0),
-        ".rdata": (4.0, 6.5),
-        ".bss": (0.0, 1.0),
-        ".rsrc": (5.0, 7.5),
-        ".reloc": (2.0, 5.0),
-    }
+    def __init__(self, config: AnalysisConfig = None):
+        self.config = config or DEFAULT_CONFIG
+        self.segment_analyzer = SegmentEntropyAnalyzer(config)
 
-    EXPECTED_SIZE_RATIO = {
-        ".text": (0.95, 1.05),
-        ".data": (0.9, 2.0),
-        ".rdata": (0.95, 1.1),
-        ".bss": (1.0, float("inf")),
-        ".rsrc": (0.9, 1.2),
-        ".reloc": (0.9, 1.5),
-    }
-
-    @classmethod
-    def analyze_section(cls, section: Dict) -> SectionAnalysis:
+    def analyze_section(self, section: Dict) -> SectionAnalysis:
         """Perform comprehensive section analysis"""
         name = section["name"]
         data = section["data"]
@@ -264,26 +254,26 @@ class SectionAnalyzer:
         overall_entropy = EntropyAnalyzer.calculate(data)
 
         # Segment-level entropy analysis
-        segment_analysis = SegmentEntropyAnalyzer.analyze_segments(data)
+        segment_analysis = self.segment_analyzer.analyze_segments(data)
 
         # Calculate metrics
         size_ratio = vsize / rsize if rsize > 0 else float("inf")
 
         # Score components
-        entropy_score, entropy_status = cls._score_entropy(overall_entropy, name)
-        size_score, size_status = cls._score_size_ratio(size_ratio, name, rsize)
-        perm_score, perm_status = cls._score_permissions(perms, name)
-        segment_score, segment_status = cls._score_segment_entropy(
+        entropy_score, entropy_status = self._score_entropy(overall_entropy, name)
+        size_score, size_status = self._score_size_ratio(size_ratio, name, rsize)
+        perm_score, perm_status = self._score_permissions(perms, name)
+        segment_score, segment_status = self._score_segment_entropy(
             segment_analysis, name
         )
 
         # Combine scores
-        suspicion_score = cls._calculate_suspicion_score(
+        suspicion_score = self._calculate_suspicion_score(
             entropy_score, size_score, perm_score, segment_score, name
         )
 
         # Generate warnings
-        warnings = cls._generate_warnings(
+        warnings = self._generate_warnings(
             name,
             overall_entropy,
             size_ratio,
@@ -295,7 +285,7 @@ class SectionAnalyzer:
             segment_analysis,
         )
 
-        suspicion_level = cls._get_suspicion_level(suspicion_score)
+        suspicion_level = self._get_suspicion_level(suspicion_score)
         is_suspicious = suspicion_score >= 50
 
         return SectionAnalysis(
@@ -313,19 +303,19 @@ class SectionAnalyzer:
             segment_analysis=segment_analysis,
         )
 
-    @classmethod
-    def _score_entropy(cls, entropy: float, section_name: str) -> Tuple[int, str]:
+    def _score_entropy(self, entropy: float, section_name: str) -> Tuple[int, str]:
         """Score entropy (0-40 points)"""
-        expected = cls.EXPECTED_ENTROPY.get(section_name, (3.0, 7.0))
+        cfg = self.config.entropy
+        expected = cfg.section_ranges.get(section_name, (3.0, 7.0))
         min_expected, max_expected = expected
 
         if section_name == ".bss":
-            if entropy < 1.0:
+            if entropy < cfg.empty:
                 return 0, "Normal (uninitialized data)"
             else:
                 return 30, "⚠️ Suspicious (BSS should be zeros)"
 
-        if entropy > 7.5:
+        if entropy > cfg.critical:
             return 40, "⚠️ Very High (Likely packed/encrypted)"
         elif entropy > max_expected:
             return 25, "⚠️ High (Possible obfuscation)"
@@ -334,22 +324,23 @@ class SectionAnalyzer:
         else:
             return 0, "Normal"
 
-    @classmethod
     def _score_size_ratio(
-        cls, ratio: float, section_name: str, raw_size: int
+        self, ratio: float, section_name: str, raw_size: int
     ) -> Tuple[int, str]:
         """Score size ratio (0-40 points)"""
+        cfg = self.config.size
+
         if section_name == ".bss" and raw_size == 0:
             return 0, "Normal (uninitialized data)"
 
-        expected = cls.EXPECTED_SIZE_RATIO.get(section_name, (0.9, 2.0))
+        expected = cfg.section_ratios.get(section_name, (0.9, 2.0))
         min_ratio, max_ratio = expected
 
-        if ratio > 10 and section_name == ".text":
+        if ratio > cfg.expansion_ratio_critical and section_name == ".text":
             return 40, "🔴 CRITICAL (10x+ expansion)"
-        elif ratio > 5 and section_name == ".text":
+        elif ratio > cfg.expansion_ratio_very_high and section_name == ".text":
             return 35, "🔴 Very High (5x+ expansion)"
-        elif ratio > 3 and section_name == ".text":
+        elif ratio > cfg.expansion_ratio_high and section_name == ".text":
             return 25, "⚠️ High (3x+ expansion)"
         elif ratio > max_ratio:
             if section_name == ".text":
@@ -361,8 +352,7 @@ class SectionAnalyzer:
         else:
             return 5, "Compressed (unusual)"
 
-    @classmethod
-    def _score_permissions(cls, perms: str, section_name: str) -> Tuple[int, str]:
+    def _score_permissions(self, perms: str, section_name: str) -> Tuple[int, str]:
         """Score permissions (0-30 points)"""
         has_w = "W" in perms
         has_x = "X" in perms
@@ -378,9 +368,8 @@ class SectionAnalyzer:
         else:
             return 0, "Normal"
 
-    @classmethod
     def _score_segment_entropy(
-        cls, segment_analysis: Dict, section_name: str
+        self, segment_analysis: Dict, section_name: str
     ) -> Tuple[int, str]:
         """Score segment entropy anomalies (0-35 points)"""
         if not segment_analysis["has_anomaly"]:
@@ -399,9 +388,8 @@ class SectionAnalyzer:
 
         return 15, "⚠️ Entropy anomaly"
 
-    @classmethod
     def _calculate_suspicion_score(
-        cls,
+        self,
         entropy_score: int,
         size_score: int,
         perm_score: int,
@@ -409,23 +397,23 @@ class SectionAnalyzer:
         section_name: str,
     ) -> int:
         """Combine scores with correlation bonuses"""
+        cfg = self.config.scoring
         base_score = entropy_score + size_score + perm_score + segment_score
 
         # KEY: Low overall entropy BUT segment anomaly = evasion
         if entropy_score < 15 and segment_score >= 25:
-            correlation_bonus = 25
+            correlation_bonus = cfg.entropy_segment_correlation_bonus
         elif entropy_score >= 25 and size_score >= 25 and section_name == ".text":
-            correlation_bonus = 20
+            correlation_bonus = cfg.entropy_size_high_correlation_bonus
         elif entropy_score >= 15 and size_score >= 15:
-            correlation_bonus = 10
+            correlation_bonus = cfg.entropy_size_moderate_correlation_bonus
         else:
             correlation_bonus = 0
 
-        return min(100, base_score + correlation_bonus)
+        return min(cfg.max_structural_score, base_score + correlation_bonus)
 
-    @classmethod
     def _generate_warnings(
-        cls,
+        self,
         name: str,
         entropy: float,
         ratio: float,
@@ -459,16 +447,17 @@ class SectionAnalyzer:
 
         return warnings
 
-    @staticmethod
-    def _get_suspicion_level(score: int) -> str:
+    def _get_suspicion_level(self, score: int) -> str:
         """Convert score to level"""
-        if score >= 80:
+        cfg = self.config.scoring
+
+        if score >= cfg.critical_threshold:
             return "CRITICAL"
-        elif score >= 60:
+        elif score >= cfg.high_threshold:
             return "HIGH"
-        elif score >= 40:
+        elif score >= cfg.medium_threshold:
             return "MEDIUM"
-        elif score >= 20:
+        elif score >= cfg.low_threshold:
             return "LOW"
         else:
             return "CLEAN"
@@ -482,7 +471,15 @@ class PackerDetector:
         "ASPack": [".aspack", ".adata"],
         "PECompact": ["PEC2", "PECompact2"],
         "Themida": [".themida"],
-        "VMProtect": [".vmp0", ".vmp1"],
+        "VMProtect": [".vmp0", ".vmp1", ".vmp2"],
+        "Enigma": [".enigma1", ".enigma2"],
+        "MPRESS": [".MPRESS1", ".MPRESS2"],
+        "NSPack": [".nsp0", ".nsp1", ".nsp2"],
+        "PESpin": [".pespin"],
+        "Petite": [".petite"],
+        "FSG": [".FSG"],
+        "MEW": ["MEW"],
+        "Armadillo": [".text1", ".text2", ".text3"],  # Multiple .text sections
     }
 
     @classmethod
@@ -501,50 +498,77 @@ class PackerDetector:
         for packer, signatures in cls.KNOWN_PACKERS.items():
             for section in sections:
                 if any(sig.lower() in section["name"].lower() for sig in signatures):
-                    detected.append(packer)
+                    if packer not in detected:
+                        detected.append(packer)
                     break
+
+        # Additional heuristics
+        section_names = [s["name"] for s in sections]
+
+        # Multiple .text sections can indicate Armadillo or custom packer
+        text_count = sum(1 for n in section_names if n.startswith(".text"))
+        if text_count > 1 and "Armadillo" not in detected:
+            detected.append("CustomPacker (multiple .text)")
+
+        # Non-standard section names
+        standard_names = {
+            ".text",
+            ".data",
+            ".rdata",
+            ".bss",
+            ".rsrc",
+            ".reloc",
+            ".idata",
+            ".edata",
+        }
+        non_standard = [
+            n
+            for n in section_names
+            if n not in standard_names and not n.startswith(".")
+        ]
+        if len(non_standard) > 2:
+            detected.append("CustomPacker (non-standard sections)")
 
         return detected
 
+    @classmethod
+    def analyze_packing_indicators(
+        cls, sections: List[Dict], config: AnalysisConfig = None
+    ) -> Dict:
+        """Comprehensive packing analysis"""
+        config = config or DEFAULT_CONFIG
 
-class StringExtractor:
-    """Extract printable strings from binary data"""
+        detected_packers = cls.detect_known_packers(sections)
+        indicators = []
+        packing_score = 0
 
-    @staticmethod
-    def extract_ascii(data: bytes, min_length: int = 4) -> List[str]:
-        """Extract ASCII strings"""
-        strings = []
-        current = ""
+        for section in sections:
+            entropy = EntropyAnalyzer.calculate(section["data"])
 
-        for byte in data:
-            if 32 <= byte <= 126:  # Printable ASCII
-                current += chr(byte)
-            else:
-                if len(current) >= min_length:
-                    strings.append(current)
-                current = ""
+            # High entropy in executable section
+            if entropy > config.entropy.critical and "X" in section.get(
+                "permissions", ""
+            ):
+                indicators.append(
+                    f"High entropy in executable {section['name']}: {entropy:.2f}"
+                )
+                packing_score += 25
 
-        # Don't forget last string
-        if len(current) >= min_length:
-            strings.append(current)
+            # Small raw size but large virtual size
+            if section["raw_size"] > 0:
+                ratio = section["virtual_size"] / section["raw_size"]
+                if ratio > config.size.expansion_ratio_very_high:
+                    indicators.append(
+                        f"Section {section['name']} expands {ratio:.1f}x in memory"
+                    )
+                    packing_score += 20
 
-        return strings
+        if detected_packers:
+            packing_score += 30
 
-    @staticmethod
-    def extract_unicode(data: bytes, min_length: int = 4) -> List[str]:
-        """Extract Unicode (UTF-16LE) strings"""
-        strings = []
-        current = ""
-
-        for i in range(0, len(data) - 1, 2):
-            if data[i + 1] == 0 and 32 <= data[i] <= 126:
-                current += chr(data[i])
-            else:
-                if len(current) >= min_length:
-                    strings.append(current)
-                current = ""
-
-        if len(current) >= min_length:
-            strings.append(current)
-
-        return strings
+        return {
+            "is_packed": packing_score >= 40,
+            "packing_score": min(100, packing_score),
+            "detected_packers": detected_packers,
+            "indicators": indicators,
+        }
