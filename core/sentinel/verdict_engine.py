@@ -173,7 +173,10 @@ class VerdictEngine:
             "Stealth": 0,  # Will calculate below
             "Integrity": 0,  # Will calculate below
             "Intent": min(30, indiscrepancy_score),
-            "Strings": min(30, string_score),  # NEW
+            "Strings": min(30, string_score),
+            "Structure": min(
+                40, int(structural_score * 0.5)
+            ),  # NEW: structural contribution
         }
 
         # Calculate Integrity score (trust deficit)
@@ -182,18 +185,14 @@ class VerdictEngine:
             integrity_score += 15
         if not features["trust_signals"]["has_bulk"]:
             integrity_score += 10
-        if structural_score > 60:
-            integrity_score += 15
 
         attribution["Integrity"] = min(40, integrity_score)
 
-        # Calculate Stealth score
+        # Calculate Stealth score (obfuscation indicators)
         stealth_score = 0
         if correlation["is_obfuscated"]:
-            stealth_score += 20
+            stealth_score += 25
         if features["iat_analysis"].get("is_ordinal_heavy", False):
-            stealth_score += 15
-        if structural_score > 50:
             stealth_score += 15
 
         attribution["Stealth"] = min(40, stealth_score)
@@ -239,10 +238,16 @@ class VerdictEngine:
             string_reasons = string_analysis.warnings
 
         # Calculate base threat score
+        # IMPORTANT: Include structural score - high entropy/packing IS a threat indicator
+        structural_contribution = min(
+            40, int(structural_score * 0.5)
+        )  # Cap at 40, weight at 50%
+
         base_score = (
             correlation["total_capability_score"]
             + indiscrepancy_score
             + int(string_score * 0.5)  # Weight string score at 50%
+            + structural_contribution  # Add structural findings
         )
 
         # Phase 3b: Trust reduction
@@ -272,6 +277,15 @@ class VerdictEngine:
 
         # Compile verdict reasons
         all_reasons = []
+
+        # Add structural findings first if significant
+        if structural_score >= 30:
+            all_reasons.append(
+                f"Structural anomalies detected (score: {structural_score}, contributing {structural_contribution} pts):"
+            )
+            if correlation["is_obfuscated"]:
+                for reason in correlation["obfuscation_reasons"]:
+                    all_reasons.append(f"  • {reason}")
 
         if correlation["capabilities"]:
             all_reasons.append(

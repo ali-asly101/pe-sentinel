@@ -11,7 +11,12 @@ class PEAnalyzer:
 
     def __init__(self, filepath: str):
         self.filepath = filepath
-        self.pe = pefile.PE(filepath)
+        # 1. We must read the raw bytes first for the String Analyzer and YARA
+        with open(filepath, "rb") as f:
+            self.raw_data = f.read()  # <--- Added this line
+
+        # 2. Pass the data to pefile so it doesn't have to read the file again
+        self.pe = pefile.PE(data=self.raw_data)
         self._cache = {}
 
     def get_architecture(self) -> tuple:

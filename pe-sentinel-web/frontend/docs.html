@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentation | PE-Sentinel</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --brand: #4f46e5; }
+        body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+        .navbar { background: white; border-bottom: 1px solid #e5e7eb; }
+        .navbar-brand { font-weight: 800; color: var(--brand) !important; }
+        .sidebar { position: sticky; top: 80px; height: calc(100vh - 100px); overflow-y: auto; }
+        .sidebar a { display: block; padding: 8px 16px; color: #64748b; text-decoration: none; border-radius: 6px; font-size: 0.9rem; }
+        .sidebar a:hover, .sidebar a.active { background: #eef2ff; color: var(--brand); }
+        .sidebar .section-title { font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; padding: 16px 16px 8px; }
+        .content { max-width: 800px; }
+        .content h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+        .content h2 { font-size: 1.5rem; font-weight: 600; margin-top: 48px; margin-bottom: 16px; padding-top: 24px; border-top: 1px solid #e5e7eb; }
+        .content h3 { font-size: 1.1rem; font-weight: 600; margin-top: 32px; margin-bottom: 12px; }
+        .content p, .content li { color: #475569; line-height: 1.7; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
+        code { font-family: 'JetBrains Mono', monospace; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #dc2626; }
+        pre code { background: none; padding: 0; color: inherit; }
+        .param-table { width: 100%; margin: 16px 0; }
+        .param-table th { background: #f8fafc; padding: 12px; text-align: left; font-size: 0.8rem; text-transform: uppercase; color: #64748b; }
+        .param-table td { padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 0.9rem; }
+        .badge-method { padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; }
+        .badge-get { background: #dcfce7; color: #166534; }
+        .badge-post { background: #dbeafe; color: #1e40af; }
+        .alert-tip { background: #f0fdf4; border-left: 4px solid #22c55e; padding: 16px; border-radius: 0 8px 8px 0; }
+        .alert-warn { background: #fffbeb; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 0 8px 8px 0; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg sticky-top">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand" href="/home"><i class="fas fa-shield-halved me-2"></i>PE-SENTINEL</a>
+            <div class="d-flex gap-3">
+                <a href="/home" class="nav-link">Home</a>
+                <a href="/docs" class="nav-link fw-bold">Docs</a>
+                <a href="/" class="btn btn-primary btn-sm">Analyzer</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-lg-2 d-none d-lg-block">
+                <div class="sidebar py-4">
+                    <div class="section-title">Getting Started</div>
+                    <a href="#installation">Installation</a>
+                    <a href="#quickstart">Quick Start</a>
+                    
+                    <div class="section-title">CLI Usage</div>
+                    <a href="#cli-basic">Basic Analysis</a>
+                    <a href="#cli-options">CLI Options</a>
+                    <a href="#cli-output">Output Formats</a>
+                    <a href="#cli-interactive">Interactive Mode</a>
+                    
+                    <div class="section-title">Web Interface</div>
+                    <a href="#web-upload">Upload & Analyze</a>
+                    <a href="#web-advanced">Advanced Panel</a>
+                    
+                    <div class="section-title">API Reference</div>
+                    <a href="#api-upload">POST /api/upload</a>
+                    <a href="#api-functions">Search Functions</a>
+                    <a href="#api-strings">Search Strings</a>
+                    <a href="#api-yara">Custom YARA</a>
+                    <a href="#api-iocs">Extract IOCs</a>
+                    
+                    <div class="section-title">Concepts</div>
+                    <a href="#scoring">Scoring System</a>
+                    <a href="#capabilities">Capabilities</a>
+                    <a href="#mitre">MITRE Mapping</a>
+                </div>
+            </div>
+
+            <!-- Content -->
+            <div class="col-lg-10 py-5 px-4 px-lg-5">
+                <div class="content">
+                    <h1>PE-Sentinel Documentation</h1>
+                    <p class="text-muted">Complete guide to using PE-Sentinel for static malware analysis.</p>
+
+                    <!-- Installation -->
+                    <h2 id="installation">Installation</h2>
+                    <h3>Requirements</h3>
+                    <ul>
+                        <li>Python 3.8+</li>
+                        <li>pip (Python package manager)</li>
+                        <li>Windows, Linux, or macOS</li>
+                    </ul>
+
+                    <h3>Install Dependencies</h3>
+<pre>
+# Clone the repository
+git clone https://github.com/yourusername/pe-sentinel.git
+cd pe-sentinel
+
+# Install Python packages
+pip install -r requirements.txt
+
+# Optional: Install YARA support
+pip install yara-python
+
+# Optional: Install disassembler
+pip install capstone
+</pre>
+
+                    <h3>Required Packages</h3>
+<pre>
+pefile>=2023.2.7
+flask>=2.3.0
+flask-cors>=4.0.0
+yara-python>=4.3.0  # Optional
+capstone>=5.0.0     # Optional
+</pre>
+
+                    <!-- Quick Start -->
+                    <h2 id="quickstart">Quick Start</h2>
+                    <h3>CLI Analysis</h3>
+<pre>
+# Analyze a file
+python analyze.py suspicious.exe
+
+# Generate HTML report
+python analyze.py malware.exe -o report.html
+
+# Quiet mode (minimal output)
+python analyze.py malware.exe -q
+</pre>
+
+                    <h3>Web Interface</h3>
+<pre>
+# Start the web server
+cd pe-sentinel-web/backend
+python app.py
+
+# Open browser to http://localhost:5000
+</pre>
+
+                    <!-- CLI Basic -->
+                    <h2 id="cli-basic">Basic CLI Analysis</h2>
+                    <p>The main CLI tool is <code>analyze.py</code>. It performs a complete 6-phase analysis:</p>
+<pre>
+python analyze.py &lt;file.exe&gt;
+</pre>
+                    <p>Example output:</p>
+<pre>
+══════════════════════════════════════════════════════════════════
+PHASE 1: STRUCTURAL ANALYSIS
+══════════════════════════════════════════════════════════════════
+
+Section Analysis:
+Section      Entropy  Ratio    Perms  Score  Level
+------------------------------------------------------------
+.text        6.45     1.00     R-X    15     🟢 LOW
+.rdata       5.12     0.89     R--    5      ✅ CLEAN
+.data        4.23     0.45     RW-    10     ✅ CLEAN
+.rsrc        7.89     1.23     R--    65     🟠 HIGH
+
+⚠️  Suspicious Sections:
+  .rsrc (65/100):
+    • High entropy (7.89) - possible encryption/packing
+</pre>
+
+                    <!-- CLI Options -->
+                    <h2 id="cli-options">CLI Options</h2>
+                    <table class="param-table">
+                        <thead>
+                            <tr><th>Option</th><th>Description</th><th>Example</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>-o, --output</code></td><td>Output file path</td><td><code>-o report.json</code></td></tr>
+                            <tr><td><code>-f, --format</code></td><td>Output format (json, md, html, sarif)</td><td><code>-f html</code></td></tr>
+                            <tr><td><code>-c, --config</code></td><td>Custom config file</td><td><code>-c config.json</code></td></tr>
+                            <tr><td><code>-q, --quiet</code></td><td>Minimal output</td><td><code>-q</code></td></tr>
+                            <tr><td><code>--create-yara-rules</code></td><td>Generate sample YARA rules</td><td><code>--create-yara-rules</code></td></tr>
+                            <tr><td><code>--save-config</code></td><td>Save default config</td><td><code>--save-config config.json</code></td></tr>
+                        </tbody>
+                    </table>
+
+                    <!-- CLI Output -->
+                    <h2 id="cli-output">Output Formats</h2>
+                    <h3>JSON</h3>
+<pre>
+python analyze.py malware.exe -o report.json -f json
+</pre>
+                    <p>Complete analysis data for programmatic use.</p>
+
+                    <h3>Markdown</h3>
+<pre>
+python analyze.py malware.exe -o report.md -f md
+</pre>
+                    <p>Human-readable report for documentation.</p>
+
+                    <h3>HTML</h3>
+<pre>
+python analyze.py malware.exe -o report.html -f html
+</pre>
+                    <p>Styled HTML report with threat visualization.</p>
+
+                    <h3>SARIF</h3>
+<pre>
+python analyze.py malware.exe -o report.sarif -f sarif
+</pre>
+                    <p>Static Analysis Results Interchange Format for CI/CD integration.</p>
+
+                    <!-- CLI Interactive -->
+                    <h2 id="cli-interactive">Interactive Mode</h2>
+                    <p>Use <code>cli.py</code> for interactive exploration:</p>
+<pre>
+python cli.py suspicious.exe
+</pre>
+                    <p>Available commands in interactive mode:</p>
+                    <table class="param-table">
+                        <thead>
+                            <tr><th>Command</th><th>Description</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>show_summary()</code></td><td>File overview</td></tr>
+                            <tr><td><code>show_sections()</code></td><td>Section analysis with entropy</td></tr>
+                            <tr><td><code>show_imports()</code></td><td>Import table with suspicious API highlighting</td></tr>
+                            <tr><td><code>show_threat_analysis()</code></td><td>Detailed threat assessment</td></tr>
+                            <tr><td><code>find_strings()</code></td><td>Extract ASCII/Unicode strings</td></tr>
+                            <tr><td><code>search_import("keyword")</code></td><td>Search for specific imports</td></tr>
+                            <tr><td><code>hexdump(offset, length)</code></td><td>View hex dump at offset</td></tr>
+                            <tr><td><code>disassemble(section)</code></td><td>Disassemble code section</td></tr>
+                        </tbody>
+                    </table>
+
+                    <!-- Web Upload -->
+                    <h2 id="web-upload">Web Interface: Upload & Analyze</h2>
+                    <ol>
+                        <li>Start the server: <code>python app.py</code></li>
+                        <li>Open <code>http://localhost:5000</code></li>
+                        <li>Drag and drop a PE file or click to browse</li>
+                        <li>Wait for analysis (10-30 seconds depending on file size)</li>
+                        <li>Review results in the dashboard</li>
+                    </ol>
+
+                    <!-- Web Advanced -->
+                    <h2 id="web-advanced">Advanced Analysis Panel</h2>
+                    <p>After uploading a file, the Advanced Analysis panel provides interactive exploration:</p>
+                    
+                    <h3><i class="fas fa-code me-2"></i>Functions Tab</h3>
+                    <p>Search imported and exported functions by name, regex, or exact match.</p>
+                    <ul>
+                        <li><strong>Contains:</strong> Partial match (e.g., "Create" finds CreateProcess, CreateThread)</li>
+                        <li><strong>Exact:</strong> Exact function name</li>
+                        <li><strong>Regex:</strong> Regular expression (e.g., <code>^Nt.*Process$</code>)</li>
+                    </ul>
+                    <p>High-risk APIs are highlighted with ⚠️</p>
+
+                    <h3><i class="fas fa-font me-2"></i>Strings Tab</h3>
+                    <p>Search all strings extracted from the binary:</p>
+                    <ul>
+                        <li>URLs, IPs, and file paths are auto-tagged</li>
+                        <li>Supports regex search</li>
+                        <li>Configurable minimum string length</li>
+                    </ul>
+
+                    <h3><i class="fas fa-shield-alt me-2"></i>YARA Tab</h3>
+                    <p>Write and run custom YARA rules:</p>
+<pre>
+rule suspicious_strings {
+    meta:
+        description = "Detect suspicious strings"
+    strings:
+        $s1 = "cmd.exe" nocase
+        $s2 = "powershell" nocase
+        $s3 = /https?:\/\/[^\s]+/
+    condition:
+        any of them
+}
+</pre>
+
+                    <h3><i class="fas fa-crosshairs me-2"></i>IOCs Tab</h3>
+                    <p>Extract all Indicators of Compromise:</p>
+                    <ul>
+                        <li>URLs</li>
+                        <li>IP addresses</li>
+                        <li>Domains</li>
+                        <li>File paths</li>
+                        <li>Registry keys</li>
+                    </ul>
+                    <p>Export as JSON for threat intelligence platforms.</p>
+
+                    <h3><i class="fas fa-th me-2"></i>Hex Tab</h3>
+                    <p>View hex dump of any section or file offset.</p>
+
+                    <!-- API Reference -->
+                    <h2 id="api-upload">API: Upload & Analyze</h2>
+                    <p><span class="badge-method badge-post">POST</span> <code>/api/upload</code></p>
+                    <p>Upload a PE file for analysis.</p>
+                    
+                    <h3>Request</h3>
+                    <p>Content-Type: <code>multipart/form-data</code></p>
+                    <table class="param-table">
+                        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>file</code></td><td>File</td><td>PE file (.exe, .dll, .sys)</td></tr>
+                            <tr><td><code>include_strings</code></td><td>Boolean</td><td>Run string analysis (default: true)</td></tr>
+                            <tr><td><code>include_yara</code></td><td>Boolean</td><td>Run YARA scan (default: true)</td></tr>
+                            <tr><td><code>keep_file</code></td><td>Boolean</td><td>Keep for advanced analysis (default: true)</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Response</h3>
+<pre>
+{
+  "success": true,
+  "session_id": "abc123...",
+  "metadata": { "filename": "test.exe", "architecture": "x64", ... },
+  "scores": { "structural": 25, "behavioral": 45, "overall": 45, "threat_level": "MEDIUM" },
+  "sections": [...],
+  "capabilities": [...],
+  "mitre": { "techniques": [...], "matrix": {...} },
+  "verdict": { "is_likely_malicious": false, "recommendations": [...] }
+}
+</pre>
+
+                    <!-- API Functions -->
+                    <h2 id="api-functions">API: Search Functions</h2>
+                    <p><span class="badge-method badge-post">POST</span> <code>/api/search/functions</code></p>
+<pre>
+{
+  "session_id": "abc123...",
+  "query": "CreateRemote",
+  "search_type": "contains",
+  "include_exports": true
+}
+</pre>
+
+                    <!-- API Strings -->
+                    <h2 id="api-strings">API: Search Strings</h2>
+                    <p><span class="badge-method badge-post">POST</span> <code>/api/search/strings</code></p>
+<pre>
+{
+  "session_id": "abc123...",
+  "query": "http://",
+  "search_type": "contains",
+  "min_length": 4,
+  "max_results": 100
+}
+</pre>
+
+                    <!-- API YARA -->
+                    <h2 id="api-yara">API: Custom YARA</h2>
+                    <p><span class="badge-method badge-post">POST</span> <code>/api/search/yara</code></p>
+<pre>
+{
+  "session_id": "abc123...",
+  "rules": "rule test { strings: $a = \"MZ\" condition: $a }"
+}
+</pre>
+
+                    <!-- API IOCs -->
+                    <h2 id="api-iocs">API: Extract IOCs</h2>
+                    <p><span class="badge-method badge-post">POST</span> <code>/api/extract/iocs</code></p>
+<pre>
+{
+  "session_id": "abc123...",
+  "types": ["urls", "ips", "domains", "files", "registry"]
+}
+</pre>
+
+                    <!-- Scoring -->
+                    <h2 id="scoring">Scoring System</h2>
+                    <p>PE-Sentinel uses a 0-100 threat score with weighted components:</p>
+                    
+                    <table class="param-table">
+                        <thead><tr><th>Component</th><th>Max Score</th><th>Description</th></tr></thead>
+                        <tbody>
+                            <tr><td>Structural</td><td>100</td><td>Section entropy, permissions, size ratios</td></tr>
+                            <tr><td>Behavioral</td><td>80</td><td>API capability patterns</td></tr>
+                            <tr><td>Strings</td><td>40</td><td>Suspicious string patterns</td></tr>
+                            <tr><td>YARA</td><td>100</td><td>Rule matches</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Threat Levels</h3>
+                    <table class="param-table">
+                        <tbody>
+                            <tr><td style="background:#dc3545;color:white;width:100px;">CRITICAL</td><td>80-100</td><td>Highly likely malicious</td></tr>
+                            <tr><td style="background:#fd7e14;color:white;">HIGH</td><td>60-79</td><td>Probably malicious</td></tr>
+                            <tr><td style="background:#ffc107;">MEDIUM</td><td>40-59</td><td>Suspicious, needs review</td></tr>
+                            <tr><td style="background:#28a745;color:white;">LOW</td><td>20-39</td><td>Minor concerns</td></tr>
+                            <tr><td style="background:#20c997;color:white;">CLEAN</td><td>0-19</td><td>Likely benign</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Trust Reduction</h3>
+                    <p>Signed binaries with metadata receive score reduction:</p>
+                    <ul>
+                        <li><strong>Signed + Version Info + Manifest:</strong> Score × 0.5</li>
+                        <li><strong>Signed only:</strong> Score × 0.7</li>
+                        <li><strong>Unsigned:</strong> No reduction</li>
+                    </ul>
+
+                    <!-- Capabilities -->
+                    <h2 id="capabilities">Detected Capabilities</h2>
+                    <p>PE-Sentinel detects these malicious capability patterns:</p>
+                    <table class="param-table">
+                        <thead><tr><th>Capability</th><th>Key APIs</th></tr></thead>
+                        <tbody>
+                            <tr><td>Process Injection</td><td>OpenProcess, VirtualAllocEx, WriteProcessMemory, CreateRemoteThread</td></tr>
+                            <tr><td>Keylogging</td><td>SetWindowsHookEx, GetAsyncKeyState, GetClipboardData</td></tr>
+                            <tr><td>Dropper</td><td>URLDownloadToFile, CreateProcess, ShellExecute</td></tr>
+                            <tr><td>Ransomware</td><td>CryptEncrypt, FindFirstFile, DeleteFile, CryptAcquireContext</td></tr>
+                            <tr><td>Persistence</td><td>RegSetValueEx, RegCreateKeyEx, CreateService</td></tr>
+                            <tr><td>Anti-Debug</td><td>IsDebuggerPresent, CheckRemoteDebuggerPresent, NtQueryInformationProcess</td></tr>
+                            <tr><td>Credential Theft</td><td>CredEnumerate, CryptUnprotectData, LsaEnumerateLogonSessions</td></tr>
+                        </tbody>
+                    </table>
+
+                    <!-- MITRE -->
+                    <h2 id="mitre">MITRE ATT&CK Mapping</h2>
+                    <p>Capabilities are mapped to MITRE ATT&CK techniques:</p>
+                    <table class="param-table">
+                        <thead><tr><th>Capability</th><th>Technique</th><th>Tactic</th></tr></thead>
+                        <tbody>
+                            <tr><td>Process Injection</td><td>T1055</td><td>Defense Evasion</td></tr>
+                            <tr><td>Keylogging</td><td>T1056.001</td><td>Collection</td></tr>
+                            <tr><td>Dropper</td><td>T1105</td><td>Command and Control</td></tr>
+                            <tr><td>Ransomware</td><td>T1486</td><td>Impact</td></tr>
+                            <tr><td>Persistence</td><td>T1547.001</td><td>Persistence</td></tr>
+                            <tr><td>Anti-Debug</td><td>T1622</td><td>Defense Evasion</td></tr>
+                            <tr><td>Credential Theft</td><td>T1555</td><td>Credential Access</td></tr>
+                        </tbody>
+                    </table>
+
+                    <div class="alert-tip mt-5">
+                        <strong>💡 Tip:</strong> Use the web interface's MITRE panel to get direct links to technique documentation on attack.mitre.org.
+                    </div>
+
+                    <div class="text-center py-5 mt-5 border-top">
+                        <p class="text-muted">Need help? Found a bug?</p>
+                        <a href="https://github.com/yourusername/pe-sentinel/issues" class="btn btn-outline-primary">
+                            <i class="fab fa-github me-2"></i>Open an Issue
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

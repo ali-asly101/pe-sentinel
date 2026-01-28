@@ -1,15 +1,19 @@
-// API Configuration
+// PE-Sentinel Frontend v2.2
+// Rich Header, Import Density, PDF Export, Dark Mode
+
 const API_URL = 'http://localhost:5000';
 
-// Global variables
 let currentAnalysis = null;
+let sessionId = null;
 let logInterval = null;
+let charts = {};
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('[DEBUG] Page loaded');
+    console.log('[DEBUG] PE-Sentinel v2.2 loaded');
     setupFileUpload();
     setupDragAndDrop();
+    setupAdvancedPanel();
     testConnection();
 });
 
@@ -18,191 +22,201 @@ async function testConnection() {
     try {
         const response = await fetch(`${API_URL}/api/health`);
         const data = await response.json();
-        console.log('[DEBUG] API health check:', data);
-        addLogEntry('✓ Connected to backend server', 'success');
+        console.log('[DEBUG] API health:', data);
+        addLogEntry(`✓ Connected to backend v${data.version}`, 'success');
+        
+        const features = Object.entries(data.features || {})
+            .filter(([k, v]) => v)
+            .map(([k]) => k.replace(/_/g, ' '));
+        addLogEntry(`Features: ${features.join(', ')}`, 'info');
+        
+        if (!data.features?.yara_scanning) {
+            document.getElementById('yaraTab')?.classList.add('disabled');
+        }
     } catch (error) {
-        console.error('[ERROR] Cannot connect to API:', error);
-        addLogEntry('✗ Cannot connect to backend. Make sure it is running on port 5000.', 'danger');
+        console.error('[ERROR] API connect failed:', error);
+        addLogEntry('✗ Cannot connect to backend. Run: python app.py', 'danger');
     }
 }
 
-// Add entry to analysis log
+// Logging
 function addLogEntry(message, type = 'info') {
     const log = document.getElementById('analysisLog');
     if (!log) return;
     
-    const colors = {
-        'info': '#17a2b8',
-        'success': '#28a745',
-        'warning': '#ffc107',
-        'danger': '#dc3545',
-    };
-    
+    const colors = { 'info': '#17a2b8', 'success': '#28a745', 'warning': '#ffc107', 'danger': '#dc3545' };
     const entry = document.createElement('div');
     entry.style.color = colors[type] || '#e4e6eb';
-    entry.style.marginBottom = '0.25rem';
     entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
     log.appendChild(entry);
     log.scrollTop = log.scrollHeight;
 }
 
-// Setup file upload
+// File upload setup
 function setupFileUpload() {
     const fileInput = document.getElementById('fileInput');
-    fileInput.addEventListener('change', handleFileSelect);
+    if (fileInput) fileInput.addEventListener('change', handleFileSelect);
 }
 
-// Setup drag and drop
 function setupDragAndDrop() {
     const uploadZone = document.getElementById('uploadZone');
+    if (!uploadZone) return;
     
     uploadZone.addEventListener('dragover', (e) => {
         e.preventDefault();
-        uploadZone.classList.add('dragover');
+        uploadZone.style.borderColor = 'var(--brand-primary)';
     });
     
     uploadZone.addEventListener('dragleave', () => {
-        uploadZone.classList.remove('dragover');
+        uploadZone.style.borderColor = 'var(--border-soft)';
     });
     
     uploadZone.addEventListener('drop', (e) => {
         e.preventDefault();
-        uploadZone.classList.remove('dragover');
-        
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            uploadFile(files[0]);
-        }
+        uploadZone.style.borderColor = 'var(--border-soft)';
+        if (e.dataTransfer.files.length > 0) uploadFile(e.dataTransfer.files[0]);
     });
 }
 
-// Handle file selection
-function handleFileSelect(event) {
-    const file = event.target.files[0];
-    if (file) {
-        console.log('[DEBUG] File selected:', file.name, file.size);
-        uploadFile(file);
-    }
+function setupAdvancedPanel() {
+    document.querySelectorAll('.adv-tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+            const target = this.dataset.target;
+            document.querySelectorAll('.adv-tab').forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+            document.querySelectorAll('.adv-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(target)?.classList.add('active');
+        });
+    });
+
+    document.getElementById('searchFunctionsBtn')?.addEventListener('click', searchFunctions);
+    document.getElementById('functionQuery')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') searchFunctions(); });
+    document.getElementById('searchStringsBtn')?.addEventListener('click', searchStrings);
+    document.getElementById('stringQuery')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') searchStrings(); });
+    document.getElementById('runYaraBtn')?.addEventListener('click', runCustomYara);
+    document.getElementById('filterSectionsBtn')?.addEventListener('click', filterSections);
+    document.getElementById('extractIocsBtn')?.addEventListener('click', extractIocs);
+    document.getElementById('getHexdumpBtn')?.addEventListener('click', getHexdump);
+    document.getElementById('downloadPdfBtn')?.addEventListener('click', downloadPdf);
 }
 
-// Simulate analysis progress
+function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (file) uploadFile(file);
+}
+
 function simulateProgress() {
     const steps = [
         'Parsing PE headers...',
+        'Analyzing Rich Header...',
+        'Calculating import density...',
         'Analyzing section entropy...',
-        'Detecting segment anomalies...',
-        'Extracting IAT information...',
-        'Running behavioral analysis...',
+        'Running YARA rules...',
         'Correlating capabilities...',
-        'Mapping MITRE ATT&CK techniques...',
-        'Generating threat verdict...',
+        'Mapping MITRE ATT&CK...',
+        'Generating verdict...',
     ];
     
     let step = 0;
+    const progressBar = document.getElementById('progressBar');
+    
     logInterval = setInterval(() => {
         if (step < steps.length) {
             addLogEntry(steps[step], 'info');
+            if (progressBar) progressBar.style.width = `${((step + 1) / steps.length) * 100}%`;
             step++;
         } else {
             clearInterval(logInterval);
         }
-    }, 800);
+    }, 400);
 }
 
-// Upload and analyze file
 async function uploadFile(file) {
-    console.log('[DEBUG] Starting upload:', file.name);
-    addLogEntry(`Starting analysis of ${file.name}`, 'info');
+    console.log('[DEBUG] Uploading:', file.name);
+    addLogEntry(`Analyzing ${file.name}...`, 'info');
     
-    // Validate file
-    const validExtensions = ['exe', 'dll', 'sys'];
-    const extension = file.name.split('.').pop().toLowerCase();
-    
-    if (!validExtensions.includes(extension)) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['exe', 'dll', 'sys'].includes(ext)) {
         addLogEntry('Invalid file type!', 'danger');
-        alert('Invalid file type. Please upload .exe, .dll, or .sys files only.');
-        return;
+        return alert('Only .exe, .dll, .sys allowed');
     }
     
     if (file.size > 50 * 1024 * 1024) {
         addLogEntry('File too large!', 'danger');
-        alert('File too large. Maximum size is 50 MB.');
-        return;
+        return alert('Max 50 MB');
     }
     
-    // Show loading
     document.getElementById('loading').style.display = 'block';
     document.getElementById('results').style.display = 'none';
-    
-    // Simulate progress
+    destroyCharts();
     simulateProgress();
     
-    // Create form data
     const formData = new FormData();
     formData.append('file', file);
-    
-    console.log('[DEBUG] Sending request to:', `${API_URL}/api/upload`);
+    formData.append('include_strings', 'true');
+    formData.append('include_yara', 'true');
+    formData.append('keep_file', 'true');
     
     try {
         const response = await fetch(`${API_URL}/api/upload`, {
             method: 'POST',
             body: formData,
-            signal: AbortSignal.timeout(120000)
+            signal: AbortSignal.timeout(180000)
         });
         
-        console.log('[DEBUG] Response status:', response.status);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('[ERROR] Server error:', errorText);
-            throw new Error(`Server returned ${response.status}: ${errorText}`);
-        }
-        
         const data = await response.json();
-        console.log('[DEBUG] Response data:', data);
-        
         if (logInterval) clearInterval(logInterval);
         
         if (data.success) {
             addLogEntry('✓ Analysis complete!', 'success');
             currentAnalysis = data;
+            sessionId = data.session_id;
+            
+            if (sessionId) {
+                addLogEntry(`Session: ${sessionId.substring(0, 16)}...`, 'info');
+                enableAdvancedPanel();
+            }
+            
+            if (data.pdf_available) {
+                document.getElementById('downloadPdfBtn').style.display = 'inline-block';
+            }
+            
             displayResults(data);
         } else {
-            addLogEntry('✗ Analysis failed: ' + data.error, 'danger');
-            console.error('[ERROR] Analysis failed:', data);
-            alert('Analysis failed: ' + (data.error || 'Unknown error'));
-            if (data.traceback) {
-                console.error('Traceback:', data.traceback);
-            }
+            throw new Error(data.error || 'Unknown error');
         }
         
     } catch (error) {
         if (logInterval) clearInterval(logInterval);
-        console.error('[ERROR] Upload failed:', error);
-        
-        let errorMessage = 'Upload failed: ' + error.message;
-        
-        if (error.name === 'AbortError') {
-            errorMessage = 'Request timeout. File analysis took too long.';
-        } else if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
-            errorMessage = 'Cannot connect to server. Make sure the backend is running.';
-        }
-        
-        addLogEntry('✗ ' + errorMessage, 'danger');
-        alert(errorMessage);
+        console.error('[ERROR]', error);
+        addLogEntry(`✗ ${error.message}`, 'danger');
+        alert(error.message);
     } finally {
         document.getElementById('loading').style.display = 'none';
     }
 }
 
-// Display results
+function enableAdvancedPanel() {
+    const panel = document.getElementById('advancedPanel');
+    if (panel) {
+        panel.style.display = 'block';
+        panel.classList.add('fade-in');
+    }
+}
+
+function destroyCharts() {
+    Object.values(charts).forEach(chart => { if (chart?.destroy) chart.destroy(); });
+    charts = {};
+}
+
+// ============================================================
+// Display Results
+// ============================================================
+
 function displayResults(data) {
-    console.log('[DEBUG] Displaying results');
-    
-    // Show results section
     document.getElementById('results').style.display = 'block';
     
-    // File metadata
+    // Metadata
     document.getElementById('filename').textContent = data.metadata.filename;
     document.getElementById('filesize').textContent = formatBytes(data.metadata.filesize);
     document.getElementById('architecture').textContent = data.metadata.architecture;
@@ -210,619 +224,767 @@ function displayResults(data) {
     document.getElementById('signed').textContent = data.metadata.is_signed ? 'Yes ✓' : 'No ✗';
     document.getElementById('timestamp').textContent = new Date(data.timestamp).toLocaleString();
     
-    // Threat scores
+    // Quick stats
+    const quickStats = document.getElementById('quickStats');
+    if (quickStats) {
+        quickStats.style.display = 'block';
+        document.getElementById('quickArch').textContent = data.metadata.architecture;
+        document.getElementById('quickSize').textContent = formatBytes(data.metadata.filesize);
+        document.getElementById('quickSigned').textContent = data.metadata.is_signed ? '✓' : '✗';
+        
+        // Compiler from Rich Header
+        const compiler = data.rich_header?.compiler_info?.visual_studio || 'Unknown';
+        document.getElementById('quickCompiler').textContent = compiler;
+    }
+    
+    // Scores
     document.getElementById('structuralScore').textContent = data.scores.structural;
     document.getElementById('behavioralScore').textContent = data.scores.behavioral;
     document.getElementById('overallScore').textContent = data.scores.overall;
     
-    const threatBadge = document.getElementById('threatBadge');
-    threatBadge.textContent = data.scores.threat_level;
-    threatBadge.style.background = data.scores.threat_color;
-    threatBadge.style.color = 'white';
+    const badge = document.getElementById('threatBadge');
+    badge.textContent = data.scores.threat_level;
+    badge.style.background = data.scores.threat_color;
+    badge.style.color = 'white';
     
-    // Section analysis table
+    // Rich Header (NEW)
+    displayRichHeader(data.rich_header);
+    
+    // Import Density (NEW)
+    displayImportDensity(data.import_analysis);
+    
+    // Other sections
     displaySectionTable(data.sections);
+    displayThreatAttribution(data.scores);
+    displayCapabilities(data.capabilities);
+    displayMitreMatrix(data.mitre);
+    displayVerdict(data.verdict);
     
-    // Charts
     try {
         createSectionChart(data.sections);
         createEntropyChart(data.sections);
         createEntropyHeatmap(data.sections);
-    } catch (error) {
-        console.error('[ERROR] Chart creation failed:', error);
+    } catch (e) {
+        console.error('Chart error:', e);
     }
     
-    // NEW: Attribution & Breakdown
-    displayThreatAttribution(data.scores);
-    displayScoreBreakdown(data);
-    displayBinaryDNA(data);
-    displayMitreMatrix(data.mitre);
-    
-    // Capabilities
-    displayCapabilities(data.capabilities);
-    
-    // Verdict
-    displayVerdict(data.verdict);
-    
-    // Scroll to results
-    document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
-}
-// Display threat attribution radar chart
-function displayThreatAttribution(scores) {
-    const attribution = scores.attribution || {};
-    const primaryDriver = scores.primary_driver || 'Unknown';
-    
-    // Create radar chart
-    const ctx = document.getElementById('attributionRadar');
-    if (!ctx) return;
-    
-    new Chart(ctx.getContext('2d'), {
-        type: 'radar',
-        data: {
-            labels: ['Capabilities', 'Stealth', 'Integrity', 'Intent'],
-            datasets: [{
-                label: 'Threat Profile',
-                data: [
-                    attribution.Capabilities || 0,
-                    attribution.Stealth || 0,
-                    attribution.Integrity || 0,
-                    attribution.Intent || 0
-                ],
-                backgroundColor: 'rgba(220, 53, 69, 0.2)',
-                borderColor: '#dc3545',
-                borderWidth: 2,
-                pointBackgroundColor: '#dc3545',
-                pointBorderColor: '#fff',
-                pointHoverBackgroundColor: '#fff',
-                pointHoverBorderColor: '#dc3545'
-            }]
-        },
-        options: {
-            responsive: true,
-            scales: {
-                r: {
-                    beginAtZero: true,
-                    max: 50,
-                    ticks: {
-                        color: '#e4e6eb',
-                        stepSize: 10
-                    },
-                    grid: {
-                        color: 'rgba(255, 255, 255, 0.1)'
-                    },
-                    pointLabels: {
-                        color: '#e4e6eb',
-                        font: {
-                            size: 14,
-                            weight: 'bold'
-                        }
-                    }
-                }
-            },
-            plugins: {
-                legend: {
-                    labels: {
-                        color: '#e4e6eb'
-                    }
-                },
-                title: {
-                    display: true,
-                    text: 'Threat Attribution Breakdown',
-                    color: '#e4e6eb',
-                    font: {
-                        size: 16
-                    }
-                }
-            }
-        }
-    });
-    
-    // Display breakdown text
-    const breakdownDiv = document.getElementById('attributionBreakdown');
-    breakdownDiv.innerHTML = `
-        <h5 style="color: #e4e6eb; margin-bottom: 1rem;">Primary Threat Driver</h5>
-        <div class="alert alert-warning">
-            <h4><i class="fas fa-exclamation-triangle"></i> ${primaryDriver}</h4>
-            <p>This is the dominant risk factor contributing to the threat score.</p>
-        </div>
-        
-        <h6 style="color: #e4e6eb; margin-top: 1.5rem;">Pillar Breakdown:</h6>
-        <ul class="list-group">
-            <li class="list-group-item bg-dark text-light">
-                <strong>Capabilities:</strong> ${attribution.Capabilities || 0}/50
-                <div class="progress mt-2" style="height: 20px;">
-                    <div class="progress-bar bg-danger" style="width: ${(attribution.Capabilities || 0) * 2}%"></div>
-                </div>
-                <small>Malicious API usage patterns</small>
-            </li>
-            <li class="list-group-item bg-dark text-light">
-                <strong>Stealth:</strong> ${attribution.Stealth || 0}/40
-                <div class="progress mt-2" style="height: 20px;">
-                    <div class="progress-bar bg-warning" style="width: ${(attribution.Stealth || 0) * 2.5}%"></div>
-                </div>
-                <small>Obfuscation & packing techniques</small>
-            </li>
-            <li class="list-group-item bg-dark text-light">
-                <strong>Integrity:</strong> ${attribution.Integrity || 0}/40
-                <div class="progress mt-2" style="height: 20px;">
-                    <div class="progress-bar bg-info" style="width: ${(attribution.Integrity || 0) * 2.5}%"></div>
-                </div>
-                <small>Trust signals (signature, metadata)</small>
-            </li>
-            <li class="list-group-item bg-dark text-light">
-                <strong>Intent:</strong> ${attribution.Intent || 0}/30
-                <div class="progress mt-2" style="height: 20px;">
-                    <div class="progress-bar bg-secondary" style="width: ${(attribution.Intent || 0) * 3.33}%"></div>
-                </div>
-                <small>Behavioral contradictions</small>
-            </li>
-        </ul>
-    `;
-}
-
-// Display score breakdown
-function displayScoreBreakdown(data) {
-    const breakdownDiv = document.getElementById('scoreBreakdown');
-    
-    const structural = data.scores.structural;
-    const behavioral = data.scores.behavioral;
-    const overall = data.scores.overall;
-    const hasSig = data.features.trust_signals.has_signature;
-    const hasBulk = data.features.trust_signals.has_bulk;
-    
-    let formula = '';
-    let explanation = '';
-    
-    if (hasSig && hasBulk) {
-        formula = `(${structural} × 0.3) + (${behavioral} × 0.7) = ${overall}`;
-        explanation = '<li><strong>Signed + Metadata:</strong> 30% structural, 70% behavioral</li>';
-    } else if (hasSig) {
-        formula = `(${structural} × 0.4) + (${behavioral} × 0.6) = ${overall}`;
-        explanation = '<li><strong>Signed only:</strong> 40% structural, 60% behavioral</li>';
-    } else {
-        formula = `max(${structural}, ${behavioral}) = ${overall}`;
-        explanation = '<li><strong>Unsigned:</strong> Take worst-case (max score)</li>';
-    }
-    
-    breakdownDiv.innerHTML = `
-        <div class="row">
-            <div class="col-md-6">
-                <h5 style="color: #e4e6eb;">Calculation Formula</h5>
-                <div class="alert alert-info">
-                    <code style="font-size: 1.1rem;">${formula}</code>
-                </div>
-                
-                <h6 style="color: #e4e6eb; margin-top: 1rem;">Weighting Strategy:</h6>
-                <ul style="color: #b0b3b8;">
-                    ${explanation}
-                    <li>Trust signals reduce threat score weight</li>
-                    <li>Obfuscation multiplier amplifies capability scores</li>
-                    <li>Final score capped at 100</li>
-                </ul>
-            </div>
-            
-            <div class="col-md-6">
-                <h5 style="color: #e4e6eb;">Component Scores</h5>
-                <table class="table table-dark">
-                    <tr>
-                        <td>Structural Analysis</td>
-                        <td><strong>${structural}/100</strong></td>
-                    </tr>
-                    <tr>
-                        <td>Behavioral Analysis</td>
-                        <td><strong>${behavioral}/100</strong></td>
-                    </tr>
-                    <tr>
-                        <td>Digital Signature</td>
-                        <td>${hasSig ? '✓ Yes (-80% threat)' : '✗ No'}</td>
-                    </tr>
-                    <tr>
-                        <td>Has Metadata</td>
-                        <td>${hasBulk ? '✓ Yes' : '✗ No'}</td>
-                    </tr>
-                    <tr class="table-primary">
-                        <td><strong>Final Score</strong></td>
-                        <td><strong>${overall}/100</strong></td>
-                    </tr>
-                </table>
-                
-                <div class="alert alert-secondary mt-3">
-                    <strong>Note:</strong> Primary threat driver is <strong>${data.scores.primary_driver}</strong>, 
-                    which contributes the most to the overall score.
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-// Display Binary DNA
-function displayBinaryDNA(data) {
-    const dnaDiv = document.getElementById('binaryDNA');
-    
-    const subsystem = data.features.ui_indicators.is_gui_subsystem ? 'GUI' : 
-                     data.features.ui_indicators.is_console_subsystem ? 'Console' : 'Unknown';
-    
-    const avgEntropy = (data.sections.reduce((sum, s) => sum + s.entropy, 0) / data.sections.length).toFixed(2);
-    
-    const ordinalRatio = (data.features.iat_analysis.ordinal_ratio * 100).toFixed(1);
-    
-    const signer = data.features.trust_signals.has_signature ? '✓ Signed' : '✗ Unsigned';
-    
-    dnaDiv.innerHTML = `
-        <h5 style="color: #e4e6eb; margin-bottom: 1rem;">Binary Characteristics</h5>
-        <table class="table table-dark table-hover">
-            <tr>
-                <td><i class="fas fa-window-maximize"></i> Subsystem</td>
-                <td><strong>${subsystem}</strong></td>
-            </tr>
-            <tr>
-                <td><i class="fas fa-random"></i> Avg Entropy</td>
-                <td><strong>${avgEntropy}</strong></td>
-            </tr>
-            <tr>
-                <td><i class="fas fa-hashtag"></i> Ordinal Ratio</td>
-                <td><strong>${ordinalRatio}%</strong></td>
-            </tr>
-            <tr>
-                <td><i class="fas fa-certificate"></i> Signature</td>
-                <td><strong>${signer}</strong></td>
-            </tr>
-            <tr>
-                <td><i class="fas fa-cube"></i> Sections</td>
-                <td><strong>${data.sections.length}</strong></td>
-            </tr>
-            <tr>
-                <td><i class="fas fa-plug"></i> Total Imports</td>
-                <td><strong>${data.features.iat_analysis.total_imports}</strong></td>
-            </tr>
-            <tr>
-                <td><i class="fas fa-book"></i> DLLs</td>
-                <td><strong>${data.features.iat_analysis.dll_count}</strong></td>
-            </tr>
-            <tr>
-                <td><i class="fas fa-network-wired"></i> Network DLLs</td>
-                <td>${data.features.ui_indicators.has_network_dlls ? '✓ Yes' : '✗ No'}</td>
-            </tr>
-            <tr>
-                <td><i class="fas fa-desktop"></i> UI DLLs</td>
-                <td>${data.features.ui_indicators.has_ui_dlls ? '✓ Yes' : '✗ No'}</td>
-            </tr>
-        </table>
-    `;
-    
-    // Create DNA visualization chart
-    const dnaCtx = document.getElementById('dnaChart');
-    if (dnaCtx) {
-        new Chart(dnaCtx.getContext('2d'), {
-            type: 'doughnut',
-            data: {
-                labels: ['Entropy', 'Ordinal %', 'Trust'],
-                datasets: [{
-                    data: [
-                        parseFloat(avgEntropy) * 12.5,  // Scale to 100
-                        parseFloat(ordinalRatio),
-                        data.features.trust_signals.has_signature ? 100 : 0
-                    ],
-                    backgroundColor: ['#ffc107', '#dc3545', '#28a745']
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: { color: '#e4e6eb' }
-                    },
-                    title: {
-                        display: true,
-                        text: 'Binary Profile',
-                        color: '#e4e6eb'
-                    }
-                }
-            }
+    // Populate hex section dropdown
+    const hexSection = document.getElementById('hexSection');
+    if (hexSection) {
+        hexSection.innerHTML = '<option value="">-- Section --</option>';
+        data.sections.forEach(s => {
+            hexSection.innerHTML += `<option value="${s.name}">${s.name}</option>`;
         });
     }
+    
+    document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
 }
 
-// Display MITRE ATT&CK Matrix
-function displayMitreMatrix(mitre) {
-    const matrixDiv = document.getElementById('mitreMatrix');
-    const badge = document.getElementById('mitreBadge');
+// ============================================================
+// Rich Header Display (NEW)
+// ============================================================
+
+function displayRichHeader(richHeader) {
+    const card = document.getElementById('richHeaderCard');
+    const content = document.getElementById('richHeaderContent');
+    const badge = document.getElementById('richBadge');
     
-    badge.textContent = mitre.total_techniques;
+    if (!card || !richHeader) return;
     
-    if (mitre.total_techniques === 0) {
-        matrixDiv.innerHTML = '<div class="alert alert-success"><i class="fas fa-check-circle"></i> No MITRE ATT&CK techniques detected</div>';
+    card.style.display = 'block';
+    
+    if (!richHeader.present) {
+        badge.textContent = 'Not Found';
+        badge.className = 'badge bg-secondary';
+        content.innerHTML = `<p class="text-muted mb-0">No Rich Header found. This binary may not be compiled with Microsoft Visual Studio, or the header was stripped.</p>`;
         return;
     }
     
-    let html = '<div class="alert alert-danger"><i class="fas fa-exclamation-triangle"></i> <strong>Warning:</strong> Matched MITRE ATT&CK techniques detected</div>';
+    const compiler = richHeader.compiler_info?.visual_studio || 'Unknown';
+    badge.textContent = compiler;
+    badge.className = richHeader.is_suspicious ? 'badge bg-danger' : 'badge bg-success';
     
-    for (const [tactic, techniques] of Object.entries(mitre.matrix)) {
-        html += `
-            <div class="mitre-tactic" style="margin-bottom: 1.5rem;">
-                <h5 style="color: #e4e6eb; background: rgba(220, 53, 69, 0.2); padding: 0.5rem; border-left: 4px solid #dc3545; margin-bottom: 1rem;">
-                    <i class="fas fa-bullseye"></i> ${tactic}
-                </h5>
-        `;
+    let html = '<div class="row">';
+    
+    // Compiler Info
+    html += `<div class="col-md-6">
+        <h6 class="mb-3">Compiler Information</h6>
+        <table class="table table-sm">
+            <tr><td class="text-muted">Visual Studio</td><td><strong>${compiler}</strong></td></tr>
+            <tr><td class="text-muted">Max Build</td><td>${richHeader.compiler_info?.max_build || 'N/A'}</td></tr>
+            <tr><td class="text-muted">Tool Entries</td><td>${richHeader.entries_count}</td></tr>
+            <tr><td class="text-muted">Valid Checksum</td><td>${richHeader.valid ? '✓ Yes' : '✗ No'}</td></tr>
+            <tr><td class="text-muted">Checksum</td><td><code>${richHeader.checksum || 'N/A'}</code></td></tr>
+        </table>
+    </div>`;
+    
+    // Timestamp Analysis
+    const tsAnalysis = richHeader.timestamp_analysis;
+    if (tsAnalysis?.checked) {
+        html += `<div class="col-md-6">
+            <h6 class="mb-3">Timestamp Analysis</h6>
+            <div class="import-alert ${tsAnalysis.is_anomalous ? '' : 'info'}">
+                <strong>${tsAnalysis.verdict}</strong><br>
+                <small>Compiler Year: ${tsAnalysis.compiler_year} | PE Year: ${tsAnalysis.pe_year}</small>
+            </div>`;
         
-        techniques.forEach(tech => {
-            html += `
-                <div class="mitre-technique" style="background: #2a2f42; padding: 1rem; margin: 0.5rem 0; border-radius: 8px; border-left: 3px solid #ffc107;">
-                    <div style="display: flex; justify-content: space-between; align-items: start;">
-                        <div style="flex: 1;">
-                            <div style="margin-bottom: 0.5rem;">
-                                <strong style="color: #ffc107; font-size: 1.1rem;">${tech.id}</strong> - 
-                                <span style="color: #e4e6eb; font-weight: 600;">${tech.name}</span>
-                            </div>
-                            <p style="color: #b0b3b8; margin: 0.5rem 0;">${tech.description}</p>
-                            <div style="margin-top: 0.5rem;">
-                                <small style="color: #17a2b8;">
-                                    <i class="fas fa-code"></i> Matched APIs: ${tech.matched_apis.join(', ')}
-                                </small>
-                            </div>
-                        </div>
-                        <div style="display: flex; gap: 0.5rem; align-items: center; margin-left: 1rem;">
-                            <span class="badge ${tech.confidence === 'High' ? 'bg-danger' : 'bg-warning'}" style="font-size: 0.9rem;">
-                                ${tech.confidence}
-                            </span>
-                            <a href="${tech.url}" target="_blank" class="btn btn-sm btn-outline-primary">
-                                <i class="fas fa-external-link-alt"></i> View
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        
+        if (tsAnalysis.anomalies?.length > 0) {
+            html += '<ul class="small text-danger mb-0">';
+            tsAnalysis.anomalies.forEach(a => html += `<li>${a}</li>`);
+            html += '</ul>';
+        }
         html += '</div>';
     }
     
-    matrixDiv.innerHTML = html;
-}
-
-// Display section table
-function displaySectionTable(sections) {
-    const tbody = document.getElementById('sectionTableBody');
-    tbody.innerHTML = '';
+    html += '</div>';
     
-    sections.forEach(section => {
-        const row = tbody.insertRow();
-        
-        const levelEmoji = {
-            'CRITICAL': '🔴',
-            'HIGH': '🟠',
-            'MEDIUM': '🟡',
-            'LOW': '🟢',
-            'CLEAN': '✅'
-        };
-        
-        row.innerHTML = `
-            <td><strong>${section.name}</strong></td>
-            <td>${section.entropy.toFixed(2)}</td>
-            <td>${section.size_ratio.toFixed(2)}x</td>
-            <td><code>${section.permissions}</code></td>
-            <td><strong>${section.suspicion_score}</strong>/100</td>
-            <td>${levelEmoji[section.suspicion_level]} ${section.suspicion_level}</td>
-        `;
-        
-        if (section.is_suspicious) {
-            row.style.background = 'rgba(220, 53, 69, 0.1)';
-        }
-    });
+    // Warnings
+    if (richHeader.suspicion_reasons?.length > 0 || richHeader.warnings?.length > 0) {
+        html += '<div class="mt-3"><h6>⚠️ Warnings</h6><ul class="text-danger small mb-0">';
+        [...(richHeader.suspicion_reasons || []), ...(richHeader.warnings || [])].forEach(w => {
+            html += `<li>${w}</li>`;
+        });
+        html += '</ul></div>';
+    }
+    
+    // Tool entries (collapsible)
+    if (richHeader.entries?.length > 0) {
+        html += `<details class="mt-3">
+            <summary class="text-muted" style="cursor:pointer;">View ${richHeader.entries.length} Tool Entries</summary>
+            <table class="table table-sm mt-2" style="font-size:0.8rem;">
+                <thead><tr><th>Tool</th><th>ID</th><th>Build</th><th>Count</th></tr></thead>
+                <tbody>`;
+        richHeader.entries.forEach(e => {
+            html += `<tr><td>${e.tool_name}</td><td>0x${e.tool_id.toString(16).toUpperCase()}</td><td>${e.tool_version}</td><td>${e.use_count}</td></tr>`;
+        });
+        html += '</tbody></table></details>';
+    }
+    
+    content.innerHTML = html;
 }
 
-// Create section size distribution chart
-function createSectionChart(sections) {
-    const ctx = document.getElementById('sectionChart');
-    if (!ctx) {
-        console.warn('[WARN] sectionChart canvas not found');
+// ============================================================
+// Import Analysis Display (Informational Only)
+// ============================================================
+
+function displayImportDensity(importAnalysis) {
+    const card = document.getElementById('importDensityCard');
+    const content = document.getElementById('importDensityContent');
+    const badge = document.getElementById('densityBadge');
+    
+    if (!card || !importAnalysis || importAnalysis.error) {
+        if (card) card.style.display = 'none';
         return;
     }
     
-    new Chart(ctx.getContext('2d'), {
-        type: 'pie',
+    card.style.display = 'block';
+    
+    const density = importAnalysis.density || {};
+    const ordinal = importAnalysis.ordinal || {};
+    const runtime = importAnalysis.runtime || {};
+    const loaders = importAnalysis.loaders || {};
+    
+    // Badge shows runtime type
+    const runtimeDetected = runtime.detected || 'Unknown';
+    const badgeColors = {
+        '.NET': 'bg-purple',
+        'Go': 'bg-info',
+        'Native': 'bg-success',
+        'Unknown': 'bg-secondary',
+    };
+    badge.textContent = runtimeDetected;
+    badge.className = `badge ${badgeColors[runtimeDetected] || 'bg-secondary'}`;
+    badge.style.background = runtimeDetected === '.NET' ? '#7c3aed' : '';
+    
+    let html = '<div class="row">';
+    
+    // Density stats
+    html += `<div class="col-md-4">
+        <h6 class="mb-3">Import Statistics</h6>
+        <table class="table table-sm">
+            <tr><td class="text-muted">Total Imports</td><td><strong>${density.total_imports || 0}</strong></td></tr>
+            <tr><td class="text-muted">DLL Count</td><td>${density.dll_count || 0}</td></tr>
+            <tr><td class="text-muted">Density Level</td><td><span class="badge bg-secondary">${density.level || 'N/A'}</span></td></tr>
+            <tr><td class="text-muted">Pattern</td><td>${density.pattern || 'N/A'}</td></tr>
+        </table>
+    </div>`;
+    
+    // Ordinal stats
+    html += `<div class="col-md-4">
+        <h6 class="mb-3">Ordinal Analysis</h6>
+        <table class="table table-sm">
+            <tr><td class="text-muted">Ordinal Imports</td><td><strong>${ordinal.ordinal_count || 0}</strong></td></tr>
+            <tr><td class="text-muted">Ordinal Ratio</td><td>${ordinal.ratio_percent || '0%'}</td></tr>
+        </table>
+    </div>`;
+    
+    // Runtime detection
+    html += `<div class="col-md-4">
+        <h6 class="mb-3">Runtime Detection</h6>
+        <table class="table table-sm">
+            <tr><td class="text-muted">Detected Runtime</td><td><strong>${runtimeDetected}</strong></td></tr>
+            <tr><td class="text-muted">.NET Application</td><td>${runtime.is_dotnet ? '✓ Yes' : 'No'}</td></tr>
+            <tr><td class="text-muted">Go Application</td><td>${runtime.is_go ? '✓ Yes' : 'No'}</td></tr>
+            <tr><td class="text-muted">Has Loaders</td><td>${loaders.has_critical_loaders ? 'Yes' : 'No'}</td></tr>
+        </table>
+    </div>`;
+    
+    html += '</div>';
+    
+    // Info note
+    if (runtime.is_dotnet || runtime.is_go) {
+        html += `<div class="alert alert-info mt-3 mb-0" style="font-size: 0.85rem;">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong>${runtimeDetected} Runtime Detected:</strong> 
+            Low import counts are normal for ${runtimeDetected} applications as they use runtime libraries for most functionality.
+        </div>`;
+    } else if (density.level === 'MINIMAL' || density.level === 'LOW') {
+        html += `<div class="alert alert-secondary mt-3 mb-0" style="font-size: 0.85rem;">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong>Note:</strong> 
+            This binary has a minimal import table. This could indicate a packed binary, a runtime-based application, or a specialized tool.
+        </div>`;
+    }
+    
+    // Loader functions if present
+    if (loaders.loader_functions?.length > 0) {
+        html += `<div class="mt-3">
+            <small class="text-muted">Loader Functions: ${loaders.loader_functions.join(', ')}</small>
+        </div>`;
+    }
+    
+    content.innerHTML = html;
+}
+
+// ============================================================
+// Other Display Functions
+// ============================================================
+
+function displaySectionTable(sections) {
+    const tbody = document.getElementById('sectionTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    
+    sections.forEach(s => {
+        const levelColors = {
+            'CRITICAL': '#dc3545', 'HIGH': '#fd7e14', 'MEDIUM': '#ffc107',
+            'LOW': '#28a745', 'CLEAN': '#20c997'
+        };
+        
+        const row = tbody.insertRow();
+        row.innerHTML = `
+            <td><strong>${s.name}</strong></td>
+            <td>${s.entropy.toFixed(2)}</td>
+            <td>${s.size_ratio.toFixed(2)}x</td>
+            <td><code>${s.permissions}</code></td>
+            <td><strong>${s.suspicion_score}</strong></td>
+            <td><span class="badge" style="background:${levelColors[s.suspicion_level]}">${s.suspicion_level}</span></td>
+        `;
+        if (s.is_suspicious) row.style.background = 'rgba(220,53,69,0.05)';
+    });
+}
+
+function displayThreatAttribution(scores) {
+    const ctx = document.getElementById('attributionRadar');
+    if (!ctx) return;
+    
+    const attr = scores.attribution || {};
+    const theme = document.documentElement.getAttribute('data-theme');
+    const textColor = theme === 'dark' ? '#f1f5f9' : '#1e293b';
+    
+    charts.attribution = new Chart(ctx.getContext('2d'), {
+        type: 'radar',
         data: {
-            labels: sections.map(s => s.name),
+            labels: Object.keys(attr),
             datasets: [{
-                data: sections.map(s => s.virtual_size),
-                backgroundColor: [
-                    '#667eea', '#764ba2', '#f093fb', '#4facfe',
-                    '#43e97b', '#fa709a', '#fee140', '#30cfd0'
-                ]
+                label: 'Threat Profile',
+                data: Object.values(attr),
+                backgroundColor: 'rgba(220,53,69,0.2)',
+                borderColor: '#dc3545',
+                borderWidth: 2,
             }]
         },
         options: {
             responsive: true,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { color: '#e4e6eb' }
-                },
-                title: {
-                    display: true,
-                    text: 'Section Size Distribution',
-                    color: '#e4e6eb'
-                }
-            }
+            scales: { r: { beginAtZero: true, max: 50, ticks: { color: textColor }, grid: { color: theme === 'dark' ? '#334155' : '#e2e8f0' } } },
+            plugins: { legend: { display: false, labels: { color: textColor } } }
         }
     });
 }
 
-// Create entropy bar chart
-function createEntropyChart(sections) {
-    const ctx = document.getElementById('entropyChart');
-    if (!ctx) {
-        console.warn('[WARN] entropyChart canvas not found');
+function displayCapabilities(capabilities) {
+    const container = document.getElementById('capabilitiesContainer');
+    if (!container) return;
+    
+    if (!capabilities?.length) {
+        container.innerHTML = '<div class="alert alert-success mb-0">✓ No malicious capabilities detected</div>';
         return;
     }
     
-    new Chart(ctx.getContext('2d'), {
+    let html = '<div class="alert alert-danger mb-3">⚠️ Malicious capabilities detected</div>';
+    capabilities.forEach(c => {
+        html += `
+            <div class="border rounded p-2 mb-2" style="border-left: 4px solid #dc3545 !important;">
+                <div class="d-flex justify-content-between">
+                    <strong>${c.description}</strong>
+                    <span class="badge bg-danger">${c.score} pts</span>
+                </div>
+                <small class="text-muted">APIs: ${c.matched_apis?.slice(0,5).join(', ')}</small>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+}
+
+function displayMitreMatrix(mitre) {
+    const container = document.getElementById('mitreMatrix');
+    const badge = document.getElementById('mitreBadge');
+    if (!container) return;
+    
+    badge.textContent = mitre.total_techniques;
+    
+    if (!mitre.total_techniques) {
+        container.innerHTML = '<div class="alert alert-success mb-0">✓ No MITRE ATT&CK techniques detected</div>';
+        return;
+    }
+    
+    let html = '<div class="alert alert-danger mb-3">⚠️ MITRE ATT&CK techniques detected</div>';
+    for (const [tactic, techniques] of Object.entries(mitre.matrix)) {
+        html += `<h6 class="text-muted small">${tactic}</h6><div class="d-flex flex-wrap gap-2 mb-3">`;
+        techniques.forEach(t => { html += `<span class="badge bg-danger">${t.id}: ${t.name}</span>`; });
+        html += '</div>';
+    }
+    container.innerHTML = html;
+}
+
+function displayVerdict(verdict) {
+    const container = document.getElementById('verdictContainer');
+    if (!container) return;
+    
+    let html = verdict.is_likely_malicious
+        ? '<div class="alert alert-danger"><h5>⚠️ LIKELY MALICIOUS</h5></div>'
+        : '<div class="alert alert-success"><h5>✓ Likely Benign</h5></div>';
+    
+    if (verdict.recommendations?.length) {
+        html += '<h6>Recommendations:</h6><ul>';
+        verdict.recommendations.forEach(r => html += `<li>${r}</li>`);
+        html += '</ul>';
+    }
+    
+    container.innerHTML = html;
+}
+
+// ============================================================
+// Charts
+// ============================================================
+
+function createSectionChart(sections) {
+    const ctx = document.getElementById('sectionChart');
+    if (!ctx) return;
+    
+    const theme = document.documentElement.getAttribute('data-theme');
+    
+    charts.section = new Chart(ctx.getContext('2d'), {
+        type: 'pie',
+        data: {
+            labels: sections.map(s => s.name),
+            datasets: [{ data: sections.map(s => s.virtual_size), backgroundColor: ['#4f46e5','#7c3aed','#ec4899','#f59e0b','#10b981','#06b6d4'] }]
+        },
+        options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: theme === 'dark' ? '#f1f5f9' : '#1e293b' } } } }
+    });
+}
+
+function createEntropyChart(sections) {
+    const ctx = document.getElementById('entropyChart');
+    if (!ctx) return;
+    
+    const theme = document.documentElement.getAttribute('data-theme');
+    
+    charts.entropy = new Chart(ctx.getContext('2d'), {
         type: 'bar',
         data: {
             labels: sections.map(s => s.name),
             datasets: [{
                 label: 'Entropy',
                 data: sections.map(s => s.entropy),
-                backgroundColor: sections.map(s => {
-                    if (s.entropy > 7.5) return '#dc3545';
-                    if (s.entropy > 6.5) return '#ffc107';
-                    return '#28a745';
-                })
+                backgroundColor: sections.map(s => s.entropy > 7.5 ? '#dc3545' : s.entropy > 6.5 ? '#ffc107' : '#28a745')
             }]
         },
-        options: {
-            responsive: true,
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    max: 8,
-                    ticks: { color: '#e4e6eb' },
-                    grid: { color: 'rgba(255, 255, 255, 0.1)' }
-                },
-                x: {
-                    ticks: { color: '#e4e6eb' },
-                    grid: { color: 'rgba(255, 255, 255, 0.1)' }
-                }
+        options: { 
+            responsive: true, 
+            scales: { 
+                y: { beginAtZero: true, max: 8, ticks: { color: theme === 'dark' ? '#f1f5f9' : '#1e293b' }, grid: { color: theme === 'dark' ? '#334155' : '#e2e8f0' } },
+                x: { ticks: { color: theme === 'dark' ? '#f1f5f9' : '#1e293b' }, grid: { color: theme === 'dark' ? '#334155' : '#e2e8f0' } }
             },
-            plugins: {
-                legend: { labels: { color: '#e4e6eb' } },
-                title: {
-                    display: true,
-                    text: 'Section Entropy Levels',
-                    color: '#e4e6eb'
-                }
-            }
+            plugins: { legend: { labels: { color: theme === 'dark' ? '#f1f5f9' : '#1e293b' } } }
         }
     });
 }
 
-// Create entropy heatmap
 function createEntropyHeatmap(sections) {
-    const heatmapPlot = document.getElementById('heatmapPlot');
-    if (!heatmapPlot) {
-        console.warn('[WARN] heatmapPlot div not found');
-        return;
-    }
+    const plot = document.getElementById('heatmapPlot');
+    if (!plot) return;
     
-    const heatmapData = [];
-    
-    sections.forEach((section) => {
-        if (section.segment_analysis && section.segment_analysis.entropies) {
-            const entropies = section.segment_analysis.entropies;
-            const chunkSize = section.segment_analysis.chunk_size_kb || 4;
-            
-            entropies.forEach((entropy, chunkIdx) => {
-                heatmapData.push({
-                    section: section.name,
-                    offset: chunkIdx * chunkSize,
-                    entropy: entropy
-                });
+    const theme = document.documentElement.getAttribute('data-theme');
+    const data = [];
+    sections.forEach(s => {
+        if (s.segment_analysis?.entropies) {
+            s.segment_analysis.entropies.forEach((e, i) => {
+                data.push({ section: s.name, offset: i * 4, entropy: e });
             });
         }
     });
     
-    if (heatmapData.length === 0) {
-        heatmapPlot.innerHTML = '<p class="text-center text-secondary">No heatmap data available</p>';
+    if (!data.length) {
+        plot.innerHTML = '<p class="text-center text-muted">No segment data</p>';
         return;
     }
     
-    // Prepare data for Plotly
-    const sectionNames = [...new Set(heatmapData.map(d => d.section))];
-    const z = [];
-    const x = [];
-    const y = [];
+    const names = [...new Set(data.map(d => d.section))];
+    const z = names.map(n => data.filter(d => d.section === n).map(d => d.entropy));
+    const x = data.filter(d => d.section === names[0]).map(d => d.offset);
     
-    sectionNames.forEach(section => {
-        const sectionData = heatmapData.filter(d => d.section === section);
-        const entropies = sectionData.map(d => d.entropy);
-        const offsets = sectionData.map(d => d.offset);
+    Plotly.newPlot(plot, [{
+        z, x, y: names, type: 'heatmap',
+        colorscale: [[0,'#28a745'],[0.5,'#ffc107'],[1,'#dc3545']]
+    }], { 
+        margin: { t: 30, l: 80, r: 30, b: 40 },
+        paper_bgcolor: theme === 'dark' ? '#1e293b' : '#ffffff',
+        plot_bgcolor: theme === 'dark' ? '#1e293b' : '#ffffff',
+        font: { color: theme === 'dark' ? '#f1f5f9' : '#1e293b' }
+    });
+}
+
+// ============================================================
+// Advanced Search Functions
+// ============================================================
+
+async function searchFunctions() {
+    if (!sessionId) return alert('Analyze a file first');
+
+    const query = document.getElementById('functionQuery').value.trim();
+    const searchType = document.getElementById('functionSearchType').value;
+    const includeExports = document.getElementById('includeExports').checked;
+    const resultsDiv = document.getElementById('functionResults');
+
+    if (!query) return alert('Enter a search query');
+
+    resultsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm"></div> Searching...</div>';
+
+    try {
+        const response = await fetch(`${API_URL}/api/search/functions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, query, search_type: searchType, include_exports: includeExports }),
+        });
+
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
+
+        let html = `<div class="alert alert-info">Found ${data.total_imports} imports, ${data.total_exports} exports</div>`;
+
+        if (data.results.imports.length > 0) {
+            html += '<h6>Imports</h6><div class="table-responsive"><table class="table table-sm"><thead><tr><th>DLL</th><th>Function</th></tr></thead><tbody>';
+            data.results.imports.forEach(imp => {
+                const isHighRisk = isHighRiskFunction(imp.function);
+                html += `<tr class="${isHighRisk ? 'table-danger' : ''}"><td><code>${imp.dll}</code></td><td><strong>${imp.function}</strong>${isHighRisk ? ' ⚠️' : ''}</td></tr>`;
+            });
+            html += '</tbody></table></div>';
+        }
+
+        if (data.results.exports.length > 0) {
+            html += '<h6 class="mt-3">Exports</h6><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Function</th><th>Ordinal</th></tr></thead><tbody>';
+            data.results.exports.forEach(exp => {
+                html += `<tr><td><strong>${exp.function}</strong></td><td>${exp.ordinal}</td></tr>`;
+            });
+            html += '</tbody></table></div>';
+        }
+
+        if (data.total_imports === 0 && data.total_exports === 0) html = '<div class="alert alert-warning">No matches found</div>';
+
+        resultsDiv.innerHTML = html;
+
+    } catch (error) {
+        resultsDiv.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+    }
+}
+
+function isHighRiskFunction(name) {
+    const highRisk = ['VirtualAlloc', 'VirtualProtect', 'WriteProcessMemory', 'CreateRemoteThread', 'NtCreateThread', 'SetWindowsHookEx', 'GetAsyncKeyState', 'LoadLibrary', 'GetProcAddress', 'CreateProcess', 'ShellExecute', 'WinExec', 'URLDownloadToFile', 'InternetOpen', 'CryptEncrypt', 'RegSetValue', 'CreateService', 'OpenProcess'];
+    return highRisk.some(hr => name.toLowerCase().includes(hr.toLowerCase()));
+}
+
+async function searchStrings() {
+    if (!sessionId) return alert('Analyze a file first');
+
+    const query = document.getElementById('stringQuery').value.trim();
+    const searchType = document.getElementById('stringSearchType').value;
+    const minLength = parseInt(document.getElementById('stringMinLength').value) || 4;
+    const resultsDiv = document.getElementById('stringResults');
+
+    resultsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm"></div> Searching...</div>';
+
+    try {
+        const response = await fetch(`${API_URL}/api/search/strings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, query, search_type: searchType, min_length: minLength, max_results: 200 }),
+        });
+
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
+
+        let html = `<div class="alert alert-info">Found ${data.matched_count} of ${data.total_strings} strings${data.truncated ? ' (truncated)' : ''}</div>`;
+
+        if (data.strings.length > 0) {
+            html += '<div class="string-results" style="max-height: 400px; overflow-y: auto;">';
+            data.strings.forEach((str, i) => {
+                const isUrl = str.match(/https?:\/\//i);
+                const isPath = str.match(/[A-Z]:\\/i);
+                const isRegistry = str.match(/HKEY_|SOFTWARE\\/i);
+                
+                let badge = '';
+                if (isUrl) badge = '<span class="badge bg-danger">URL</span>';
+                else if (isRegistry) badge = '<span class="badge bg-warning">Registry</span>';
+                else if (isPath) badge = '<span class="badge bg-info">Path</span>';
+                
+                html += `<div class="string-item p-2 border-bottom" style="font-family: monospace; font-size: 0.85rem;"><span class="text-muted me-2">${i + 1}.</span>${badge}<span class="ms-1">${escapeHtml(str)}</span></div>`;
+            });
+            html += '</div>';
+        } else {
+            html = '<div class="alert alert-warning">No strings found</div>';
+        }
+
+        resultsDiv.innerHTML = html;
+
+    } catch (error) {
+        resultsDiv.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+    }
+}
+
+async function runCustomYara() {
+    if (!sessionId) return alert('Analyze a file first');
+
+    const rules = document.getElementById('yaraRules').value.trim();
+    const resultsDiv = document.getElementById('yaraResults');
+
+    if (!rules) return alert('Enter YARA rules');
+
+    resultsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm"></div> Scanning...</div>';
+
+    try {
+        const response = await fetch(`${API_URL}/api/search/yara`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, rules }),
+        });
+
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
+
+        let html = '';
+        if (data.matches.length > 0) {
+            html = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i>${data.total_matches} rule(s) matched!</div>`;
+            data.matches.forEach(match => {
+                html += `<div class="card mb-2 border-danger"><div class="card-header bg-danger text-white"><strong>${match.rule}</strong>${match.tags.map(t => `<span class="badge bg-light text-dark ms-1">${t}</span>`).join('')}</div>
+                <div class="card-body">${match.strings.length > 0 ? `<strong>Matches:</strong><table class="table table-sm mt-1"><thead><tr><th>ID</th><th>Offset</th><th>Data</th></tr></thead><tbody>${match.strings.slice(0, 20).map(s => `<tr><td><code>${s.identifier}</code></td><td><code>0x${s.offset.toString(16)}</code></td><td><code>${escapeHtml(s.data)}</code></td></tr>`).join('')}</tbody></table>` : ''}</div></div>`;
+            });
+        } else {
+            html = '<div class="alert alert-success"><i class="fas fa-check-circle me-2"></i>No rules matched</div>';
+        }
+
+        resultsDiv.innerHTML = html;
+
+    } catch (error) {
+        resultsDiv.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+    }
+}
+
+async function filterSections() {
+    if (!sessionId) return alert('Analyze a file first');
+
+    const minEntropy = parseFloat(document.getElementById('sectionMinEntropy').value) || 0;
+    const permissions = document.getElementById('sectionPermissions').value.trim();
+    const suspiciousOnly = document.getElementById('sectionSuspiciousOnly').checked;
+    const resultsDiv = document.getElementById('sectionResults');
+
+    resultsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm"></div> Filtering...</div>';
+
+    try {
+        const filter = {};
+        if (minEntropy > 0) filter.min_entropy = minEntropy;
+        if (permissions) filter.permissions = permissions;
+        if (suspiciousOnly) filter.suspicious_only = true;
+
+        const response = await fetch(`${API_URL}/api/search/sections`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, filter }),
+        });
+
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
+
+        let html = `<div class="alert alert-info">Showing ${data.filtered_count} of ${data.total_sections} sections</div>`;
+
+        if (data.sections.length > 0) {
+            html += '<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Name</th><th>Entropy</th><th>Ratio</th><th>Perms</th><th>Score</th><th>Level</th></tr></thead><tbody>';
+            data.sections.forEach(s => {
+                const levelClass = s.suspicion_level === 'CRITICAL' ? 'table-danger' : s.suspicion_level === 'HIGH' ? 'table-warning' : '';
+                html += `<tr class="${levelClass}"><td><strong>${s.name}</strong></td><td>${s.entropy.toFixed(2)}</td><td>${s.size_ratio.toFixed(2)}x</td><td><code>${s.permissions}</code></td><td>${s.suspicion_score}</td><td>${s.suspicion_level}</td></tr>`;
+            });
+            html += '</tbody></table></div>';
+        } else {
+            html = '<div class="alert alert-warning">No sections match the filter</div>';
+        }
+
+        resultsDiv.innerHTML = html;
+
+    } catch (error) {
+        resultsDiv.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+    }
+}
+
+async function extractIocs() {
+    if (!sessionId) return alert('Analyze a file first');
+
+    const resultsDiv = document.getElementById('iocResults');
+    resultsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm"></div> Extracting...</div>';
+
+    try {
+        const response = await fetch(`${API_URL}/api/extract/iocs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, types: ['urls', 'ips', 'domains', 'files', 'registry'] }),
+        });
+
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
+
+        let html = `<div class="alert alert-info">Extracted ${data.total} IOCs from ${data.filename}</div>`;
+
+        const iocTypes = {
+            urls: { icon: '🔗', label: 'URLs', color: 'danger' },
+            ips: { icon: '🌐', label: 'IP Addresses', color: 'warning' },
+            domains: { icon: '🏠', label: 'Domains', color: 'info' },
+            files: { icon: '📁', label: 'File Paths', color: 'secondary' },
+            registry: { icon: '🔧', label: 'Registry Keys', color: 'dark' },
+        };
+
+        for (const [type, config] of Object.entries(iocTypes)) {
+            const items = data.iocs[type] || [];
+            if (items.length > 0) {
+                html += `<div class="mb-3"><h6>${config.icon} ${config.label} (${items.length})</h6><div class="d-flex flex-wrap gap-1">${items.slice(0, 20).map(item => `<code class="badge bg-${config.color}">${escapeHtml(item.substring(0, 60))}${item.length > 60 ? '...' : ''}</code>`).join('')}${items.length > 20 ? `<span class="text-muted">+${items.length - 20} more</span>` : ''}</div></div>`;
+            }
+        }
+
+        html += `<div class="mt-3"><button class="btn btn-sm btn-outline-primary" onclick="downloadIocs()"><i class="fas fa-download me-1"></i>Export IOCs (JSON)</button></div>`;
+
+        resultsDiv.innerHTML = html;
+        window.currentIocs = data.iocs;
+
+    } catch (error) {
+        resultsDiv.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+    }
+}
+
+function downloadIocs() {
+    if (!window.currentIocs) return;
+    const blob = new Blob([JSON.stringify(window.currentIocs, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `iocs_${currentAnalysis?.metadata?.filename || 'unknown'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+async function getHexdump() {
+    if (!sessionId) return alert('Analyze a file first');
+
+    const section = document.getElementById('hexSection').value.trim();
+    const offset = parseInt(document.getElementById('hexOffset').value) || 0;
+    const length = parseInt(document.getElementById('hexLength').value) || 256;
+    const resultsDiv = document.getElementById('hexResults');
+
+    resultsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm"></div> Loading...</div>';
+
+    try {
+        const body = { session_id: sessionId, length };
+        if (section) body.section = section;
+        else body.offset = offset;
+
+        const response = await fetch(`${API_URL}/api/hexdump`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
+
+        let html = `<div class="alert alert-info">Offset: 0x${data.offset.toString(16)} | Length: ${data.length} bytes</div>`;
+        html += '<div class="hexdump" style="font-family: monospace; font-size: 0.85rem; background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow-x: auto;">';
         
-        z.push(entropies);
-        if (x.length === 0) {
-            x.push(...offsets);
-        }
-        y.push(section);
-    });
-    
-    const trace = {
-        z: z,
-        x: x,
-        y: y,
-        type: 'heatmap',
-        colorscale: [
-            [0, '#28a745'],
-            [0.5, '#ffc107'],
-            [0.75, '#fd7e14'],
-            [1, '#dc3545']
-        ],
-        colorbar: {
-            title: 'Entropy',
-            titleside: 'right',
-            tickfont: { color: '#e4e6eb' },
-            titlefont: { color: '#e4e6eb' }
-        }
-    };
-    
-    const layout = {
-        title: 'Entropy Distribution Heatmap',
-        xaxis: { title: 'Offset (KB)', color: '#e4e6eb' },
-        yaxis: { title: 'Section', color: '#e4e6eb' },
-        paper_bgcolor: '#1a1d29',
-        plot_bgcolor: '#1a1d29',
-        font: { color: '#e4e6eb' }
-    };
-    
-    Plotly.newPlot(heatmapPlot, [trace], layout);
-}
+        data.lines.forEach(line => {
+            html += `<div><span style="color: #60a5fa;">${line.offset}</span>  <span style="color: #fbbf24;">${line.hex.padEnd(48)}</span>  <span style="color: #34d399;">${line.ascii}</span></div>`;
+        });
+        
+        html += '</div>';
+        resultsDiv.innerHTML = html;
 
-// Display capabilities
-function displayCapabilities(capabilities) {
-    const container = document.getElementById('capabilitiesContainer');
-    
-    if (capabilities.length === 0) {
-        container.innerHTML = '<p class="text-success">✓ No malicious capabilities detected</p>';
-        return;
+    } catch (error) {
+        resultsDiv.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
     }
-    
-    container.innerHTML = '<div class="alert alert-danger">⚠️ <strong>Warning:</strong> Malicious capabilities detected</div>';
-    
-    capabilities.forEach(cap => {
-        const badge = document.createElement('div');
-        badge.className = 'capability-badge';
-        badge.innerHTML = `
-            <strong>${cap.description}</strong><br>
-            <small>Score: ${cap.score} | APIs: ${cap.matched_apis.join(', ')}</small>
-        `;
-        container.appendChild(badge);
-    });
 }
 
-// Display verdict
-function displayVerdict(verdict) {
-    const container = document.getElementById('verdictContainer');
+// ============================================================
+// PDF Export (NEW)
+// ============================================================
+
+async function downloadPdf() {
+    if (!sessionId) return alert('Analyze a file first');
     
-    if (verdict.is_likely_malicious) {
-        container.innerHTML = '<div class="alert alert-danger"><strong>⚠️ LIKELY MALICIOUS</strong></div>';
-    } else {
-        container.innerHTML = '<div class="alert alert-success"><strong>✓ Likely Benign</strong></div>';
+    addLogEntry('Generating PDF report...', 'info');
+    
+    try {
+        const response = await fetch(`${API_URL}/api/export/pdf/${sessionId}`);
+        
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'PDF generation failed');
+        }
+        
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pe-sentinel-report-${currentAnalysis?.metadata?.filename || 'unknown'}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        addLogEntry('✓ PDF downloaded', 'success');
+        
+    } catch (error) {
+        addLogEntry(`✗ PDF export failed: ${error.message}`, 'danger');
+        alert(`PDF export failed: ${error.message}`);
     }
-    
-    const reasonsList = document.createElement('ul');
-    verdict.reasons.forEach(reason => {
-        const li = document.createElement('li');
-        li.textContent = reason;
-        reasonsList.appendChild(li);
-    });
-    
-    container.appendChild(reasonsList);
 }
 
-// Utility: Format bytes
+// ============================================================
+// Utilities
+// ============================================================
+
 function formatBytes(bytes) {
-    if (bytes === 0) return '0 Bytes';
+    if (!bytes) return '0 B';
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
