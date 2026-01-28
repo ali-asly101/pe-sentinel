@@ -289,7 +289,7 @@ This project is licensed under the MIT License
 
 ## 📬 Contact
 
-**Your Name** - aliomaruniversity@gmail.com
+**Mail** - aliomaruniversity@gmail.com
 
 Project Link: [https://github.com/ali-asly101/pe-sentinel](https://github.com/ali-asly101/pe-sentinel)
 
