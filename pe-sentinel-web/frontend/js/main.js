@@ -465,20 +465,32 @@ function displaySectionTable(sections) {
     if (!tbody) return;
     tbody.innerHTML = '';
     
+    if (!sections || sections.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No sections found</td></tr>';
+        return;
+    }
+    
     sections.forEach(s => {
         const levelColors = {
             'CRITICAL': '#dc3545', 'HIGH': '#fd7e14', 'MEDIUM': '#ffc107',
             'LOW': '#28a745', 'CLEAN': '#20c997'
         };
         
+        // Handle null/undefined values safely
+        const entropy = s.entropy != null ? s.entropy.toFixed(2) : 'N/A';
+        const sizeRatio = s.size_ratio != null ? s.size_ratio.toFixed(2) + 'x' : 'N/A';
+        const permissions = s.permissions || 'N/A';
+        const score = s.suspicion_score != null ? s.suspicion_score : 0;
+        const level = s.suspicion_level || 'UNKNOWN';
+        
         const row = tbody.insertRow();
         row.innerHTML = `
-            <td><strong>${s.name}</strong></td>
-            <td>${s.entropy.toFixed(2)}</td>
-            <td>${s.size_ratio.toFixed(2)}x</td>
-            <td><code>${s.permissions}</code></td>
-            <td><strong>${s.suspicion_score}</strong></td>
-            <td><span class="badge" style="background:${levelColors[s.suspicion_level]}">${s.suspicion_level}</span></td>
+            <td><strong>${s.name || 'Unknown'}</strong></td>
+            <td>${entropy}</td>
+            <td>${sizeRatio}</td>
+            <td><code>${permissions}</code></td>
+            <td><strong>${score}</strong></td>
+            <td><span class="badge" style="background:${levelColors[level] || '#6c757d'}">${level}</span></td>
         `;
         if (s.is_suspicious) row.style.background = 'rgba(220,53,69,0.05)';
     });
@@ -580,15 +592,19 @@ function displayVerdict(verdict) {
 
 function createSectionChart(sections) {
     const ctx = document.getElementById('sectionChart');
-    if (!ctx) return;
+    if (!ctx || !sections || sections.length === 0) return;
     
     const theme = document.documentElement.getAttribute('data-theme');
+    
+    // Filter out sections with null virtual_size
+    const validSections = sections.filter(s => s.virtual_size != null);
+    if (validSections.length === 0) return;
     
     charts.section = new Chart(ctx.getContext('2d'), {
         type: 'pie',
         data: {
-            labels: sections.map(s => s.name),
-            datasets: [{ data: sections.map(s => s.virtual_size), backgroundColor: ['#4f46e5','#7c3aed','#ec4899','#f59e0b','#10b981','#06b6d4'] }]
+            labels: validSections.map(s => s.name || 'Unknown'),
+            datasets: [{ data: validSections.map(s => s.virtual_size || 0), backgroundColor: ['#4f46e5','#7c3aed','#ec4899','#f59e0b','#10b981','#06b6d4'] }]
         },
         options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: theme === 'dark' ? '#f1f5f9' : '#1e293b' } } } }
     });
@@ -596,18 +612,22 @@ function createSectionChart(sections) {
 
 function createEntropyChart(sections) {
     const ctx = document.getElementById('entropyChart');
-    if (!ctx) return;
+    if (!ctx || !sections || sections.length === 0) return;
     
     const theme = document.documentElement.getAttribute('data-theme');
+    
+    // Filter out sections with null entropy
+    const validSections = sections.filter(s => s.entropy != null);
+    if (validSections.length === 0) return;
     
     charts.entropy = new Chart(ctx.getContext('2d'), {
         type: 'bar',
         data: {
-            labels: sections.map(s => s.name),
+            labels: validSections.map(s => s.name || 'Unknown'),
             datasets: [{
                 label: 'Entropy',
-                data: sections.map(s => s.entropy),
-                backgroundColor: sections.map(s => s.entropy > 7.5 ? '#dc3545' : s.entropy > 6.5 ? '#ffc107' : '#28a745')
+                data: validSections.map(s => s.entropy || 0),
+                backgroundColor: validSections.map(s => (s.entropy || 0) > 7.5 ? '#dc3545' : (s.entropy || 0) > 6.5 ? '#ffc107' : '#28a745')
             }]
         },
         options: { 
