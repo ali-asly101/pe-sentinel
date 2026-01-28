@@ -23,7 +23,7 @@
 PE-Sentinel is a comprehensive static analysis tool for Windows Portable Executable (PE) files. It performs deep inspection of binary structure, import tables, and behavioral patterns to identify potential malware without execution.
 
 <p align="center">
-  <img src="docs/images/screenshot.png" alt="PE-Sentinel Dashboard" width="800">
+<img width="1091" height="787" alt="image" src="https://github.com/user-attachments/assets/237a3599-2fcb-4d36-87d3-cc1c07673ab4" />
 </p>
 
 ## 🎯 Key Capabilities
@@ -42,6 +42,7 @@ PE-Sentinel is a comprehensive static analysis tool for Windows Portable Executa
 - Packer/crypter detection via entropy heuristics
 - Permission anomaly detection (RWX sections)
 - Size ratio analysis for section inflation detection
+<img width="1742" height="737" alt="image" src="https://github.com/user-attachments/assets/a81f3b71-2b2e-4ef5-a172-9df89a9520fa" />
 
 ### Behavioral Analysis
 - API capability correlation (50+ malicious patterns)
